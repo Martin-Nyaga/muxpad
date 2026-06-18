@@ -161,6 +161,22 @@ class IntegrationTest < MuxpadTest
     assert managed("first", "task", "failure").first.finished
   end
 
+  def test_interrupting_a_keep_command_drops_to_a_shell_instead_of_closing_the_pane
+    @app.start(project_id: "first", empty: true, attach: false)
+    Dir.chdir(@project) { @app.task("api", attach: false) } # sleep 30, exit_mode: keep
+    sleep 0.4
+    pane = managed("first", "task", "api").first
+    refute pane.finished, "task should still be running before interrupt"
+
+    system("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "send-keys", "-t", pane.id, "C-c")
+    sleep 0.6
+
+    survivor = managed("first", "task", "api").first
+    refute_nil survivor, "interrupting a keep command must not close the pane"
+    assert survivor.finished
+    assert_includes captured_pane(survivor.id), "[Muxpad] Command failed with status 130"
+  end
+
   def test_ad_hoc_session_has_no_project_tasks
     Dir.chdir(@tmp) do
       session = @app.start(attach: false)

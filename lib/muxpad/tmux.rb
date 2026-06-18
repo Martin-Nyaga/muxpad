@@ -140,24 +140,29 @@ module Muxpad
     private
 
     def wrapped_command(command, exit_mode)
+      return "sh -c #{Shellwords.escape("exec #{command}")}" if exit_mode == "close"
       tmux = @prefix.map { |part| Shellwords.escape(part) }.join(" ")
-      # Mark the pane finished and hand it back to an interactive shell so the
-      # output stays scrollable and the user can keep working in place.
-      to_shell = "#{tmux} set-option -p -t \"$TMUX_PANE\" @muxpad_finished 1; exec \"${SHELL:-/bin/sh}\""
-      inner = case exit_mode
+      # muxpad_drop marks the pane finished and hands it back to an interactive
+      # shell so the output stays scrollable and the user can keep working in
+      # place. Trapping INT/TERM means an interrupted command still reverts to a
+      # shell instead of killing the pane (and the session, if it is the last).
+      drop = <<~SH.chomp
+        muxpad_drop() {
+          if [ "${status:-1}" -eq 0 ]; then label=exited; else label=failed; fi
+          printf '\\n[Muxpad] Command %s with status %s. Dropped to a shell; scroll output with prefix + [.\\n' "$label" "$status" >&2
+          #{tmux} set-option -p -t "$TMUX_PANE" @muxpad_finished 1
+          exec "${SHELL:-/bin/sh}"
+        }
+        trap 'status=$?; muxpad_drop' INT TERM
+      SH
+      tail = case exit_mode
       when "keep-on-error"
-        "( #{command}\n); status=$?; if [ $status -eq 0 ]; then #{tmux} kill-pane -t \"$TMUX_PANE\"; else #{failure_footer}; #{to_shell}; fi"
+        "if [ $status -eq 0 ]; then #{tmux} kill-pane -t \"$TMUX_PANE\"; else muxpad_drop; fi"
       when "keep"
-        "( #{command}\n); status=$?; #{failure_footer(always: true)}; #{to_shell}"
-      when "close"
-        "exec #{command}"
+        "muxpad_drop"
       end
+      inner = "#{drop}\n( #{command}\n); status=$?\n#{tail}"
       "sh -c #{Shellwords.escape(inner)}"
-    end
-
-    def failure_footer(always: false)
-      label = always ? "Command exited" : "Command failed"
-      "printf '\\n[Muxpad] #{label} with status %s. Dropped to a shell; scroll output with prefix + [.\\n' \"$status\" >&2"
     end
 
     def sync_path(session)
