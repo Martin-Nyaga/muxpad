@@ -160,10 +160,34 @@ class IntegrationTest < MuxpadTest
   def test_ad_hoc_session_has_no_project_tasks
     Dir.chdir(@tmp) do
       session = @app.start(attach: false)
-      assert_match(/\Amuxpad-/, session)
+      assert_equal File.basename(@tmp), session
       assert_equal "", @tmux.project_context(session)
       assert_raises(Muxpad::Error) { @app.task("api", attach: false) }
     end
+  end
+
+  def test_ad_hoc_sessions_use_clean_names_and_disambiguate_conflicts
+    one = File.join(@tmp, "a", "web")
+    two = File.join(@tmp, "b", "web")
+    FileUtils.mkdir_p(one)
+    FileUtils.mkdir_p(two)
+
+    first = Dir.chdir(one) { @app.start(attach: false) }
+    assert_equal "web", first
+
+    # Re-running in the same directory reuses the existing session.
+    reused = Dir.chdir(one) { @app.start(attach: false) }
+    assert_equal "web", reused
+
+    # A different directory with the same basename gets a numeric suffix.
+    second = Dir.chdir(two) { @app.start(attach: false) }
+    assert_equal "web-2", second
+
+    assert_equal one, @tmux.session_root("web")
+    assert_equal two, @tmux.session_root("web-2")
+  ensure
+    @tmux.kill_session("web") if @tmux.session_exists?("web")
+    @tmux.kill_session("web-2") if @tmux.session_exists?("web-2")
   end
 
   def test_direct_agent_creation_launches_project_defaults
@@ -208,7 +232,9 @@ class IntegrationTest < MuxpadTest
   end
 
   def test_ordinary_tmux_session_uses_active_path_without_gaining_project_context
-    system("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "new-session", "-d", "-s", "ordinary", "-c", @tmp)
+    # Hold the pane on a non-shell command so its working directory stays put;
+    # a login shell may cd during startup and race the path captures below.
+    system("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "new-session", "-d", "-s", "ordinary", "-c", @tmp, "sleep 300")
 
     assert_equal "", @tmux.project_context("ordinary")
     actual_path, = Open3.capture2("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "display-message", "-p", "-t", "ordinary", '#{pane_current_path}')

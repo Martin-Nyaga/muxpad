@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "digest"
 require "shellwords"
 
 module Muxpad
@@ -72,6 +71,25 @@ module Muxpad
 
     def session_name(project)
       project&.id || adhoc_name(Dir.pwd)
+    end
+
+    # Ad-hoc sessions are named after the directory. Reuse an existing muxpad
+    # session rooted at this directory, otherwise pick the first free name,
+    # disambiguating with a numeric suffix only when the name is already taken.
+    def adhoc_name(path)
+      root = File.expand_path(path)
+      existing = tmux.sessions.find { |session| tmux.project_context(session).empty? && tmux.managed_root(session) == root }
+      existing || available_name(adhoc_base(root))
+    end
+
+    def adhoc_base(root)
+      base = File.basename(root).downcase.gsub(/[^a-z0-9_-]+/, "-").gsub(/\A-+|-+\z/, "")
+      base.empty? ? "session" : base
+    end
+
+    def available_name(base)
+      return base unless tmux.session_exists?(base)
+      (2..).each { |n| return "#{base}-#{n}" unless tmux.session_exists?("#{base}-#{n}") }
     end
 
     def session_for_command
@@ -248,12 +266,6 @@ module Muxpad
 
     def agent_instance_name(name, instance)
       instance == 1 ? name : "#{name} #{instance}"
-    end
-
-    def adhoc_name(path)
-      base = File.basename(File.expand_path(path)).downcase.gsub(/[^a-z0-9_-]+/, "-").gsub(/\A-+|-+\z/, "")
-      base = "directory" if base.empty?
-      "muxpad-#{base}-#{Digest::SHA256.hexdigest(File.expand_path(path))[0, 8]}"
     end
 
     def confirm_switch(session)

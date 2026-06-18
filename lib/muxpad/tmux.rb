@@ -34,6 +34,10 @@ module Muxpad
       run(*@prefix, "has-session", "-t", "=#{name}", allow_failure: true).success?
     end
 
+    def sessions
+      capture("list-sessions", "-F", '#{session_name}', allow_failure: true).lines(chomp: true)
+    end
+
     def create_session(name, root, project_id: nil)
       pane = capture("new-session", "-d", "-P", "-F", '#{pane_id}', "-s", name, "-c", root, "-n", "shell").strip
       run! "set-option", "-t", name, "@muxpad_root", root
@@ -48,9 +52,15 @@ module Muxpad
     end
 
     def session_root(session)
-      root = capture("show-options", "-qv", "-t", session, "@muxpad_root", allow_failure: true).strip
+      root = managed_root(session)
       return root unless root.empty?
       capture("display-message", "-p", "-t", session, '#{pane_current_path}').strip
+    end
+
+    # The directory a muxpad-managed session was created for. Empty for sessions
+    # muxpad did not create, so it can be used to recognise our own sessions.
+    def managed_root(session)
+      capture("show-options", "-qv", "-t", session, "@muxpad_root", allow_failure: true).strip
     end
 
     def panes(session)
