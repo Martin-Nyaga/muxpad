@@ -1,0 +1,37 @@
+projects:
+  sample-app:
+    name: sample-app
+    root: ~/code/sample-app
+    default_tasks: [api, mobile]
+    discovery:
+      exclude:
+        - "mobile:translations:*"
+    tasks:
+      api:
+        name: api
+        description: Start the API development server
+        command: npm run dev:api
+        exit_mode: keep
+      mobile:
+        name: mobile
+        description: Start the mobile development server
+        command: npm run dev
+        directory: packages/mobile
+        exit_mode: keep
+      tests:
+        name: tests
+        description: Run tests in watch mode
+        command: npm run test:watch
+      editor:
+        name: editor
+        description: Open the project in the configured editor
+        command: $EDITOR .
+
+# Built-in agents can be overridden or disabled here.
+agents:
+  claude:
+    enabled: true
+  codex:
+    command: codex
+  opencode:
+    enabled: true
