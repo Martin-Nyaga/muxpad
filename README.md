@@ -1,4 +1,8 @@
-# Muxpad prototype
+<p align="center">
+  <img src="assets/logo.svg" alt="muxpad" width="420">
+</p>
+
+# Muxpad
 
 Muxpad is a project-aware command palette and launcher for tmux. It puts your
 configured project tasks, discovered package scripts, and coding agents in one
