@@ -19,6 +19,8 @@ module Muxpad
     RIGHT_PAD = 2 # blank columns kept clear on the right edge
     NAME_MIN = 10
     NAME_MAX = 24
+    RUNNING_SECTION = "RUNNING" # split into the left sidebar rather than the launch list
+    SIDEBAR_WIDTH = 20
 
     RESET = "\e[0m"
     BOLD = "\e[1m"
@@ -41,9 +43,12 @@ module Muxpad
 
     def select(items, section_order:)
       raise Error, "the Muxpad palette requires an interactive terminal" unless @input.tty?
-      @items = items
+      @running = items.select { |item| item.section == RUNNING_SECTION }
+      @launch_items = items.reject { |item| item.section == RUNNING_SECTION }
       @section_order = section_order
-      @name_width = name_width(items)
+      @name_width = name_width(@launch_items)
+      @focus = :launch
+      @run_cursor = 0
       @query = +""
       refilter
       interact { |key| handle_select_key(key) }
@@ -91,12 +96,14 @@ module Muxpad
       case key
       when :up then move(-1)
       when :down then move(1)
+      when :left then set_focus(:running)
+      when :right then set_focus(:launch)
       when :backspace then edit { @query.chop! }
       when :clear then edit { @query.clear }
       when Array then edit { @query << key.last } # [:char, c]
-      when :enter then return [selection("enter")]
-      when :tab then return [selection("tab")] if current
-      when :restart then return [selection("ctrl-r")] if current
+      when :enter then return [selection("enter")] if current
+      when :tab then return [selection("tab")] if @focus == :launch && current
+      when :restart then return [selection("ctrl-r")] if @focus == :launch && current
       when :escape, :cancel then return [nil]
       end
       nil
@@ -106,7 +113,17 @@ module Muxpad
       [action, current.token]
     end
 
+    # The sidebar only exists while something is running; otherwise the launch
+    # list owns the full width and focus stays put.
+    def set_focus(pane)
+      return if pane == :running && @running.empty?
+      @focus = pane
+    end
+
+    # Typing always searches the launch list, so editing the query pulls focus
+    # back to it from the sidebar.
     def edit
+      @focus = :launch
       yield
       refilter
     end
@@ -114,7 +131,7 @@ module Muxpad
     # Rebuild the grouped, ranked view for the current query and the flat list of
     # rendered rows (headers, blanks, items) the cursor and scroller walk over.
     def refilter
-      ranked = @items.filter_map do |item|
+      ranked = @launch_items.filter_map do |item|
         score = score(item)
         [item, score] if score
       end
@@ -134,11 +151,17 @@ module Muxpad
     end
 
     def current
+      return @running[@run_cursor] if @focus == :running
       row = @selectable[@cursor]
       row && @rows[row][:item]
     end
 
     def move(delta)
+      if @focus == :running
+        return if @running.empty?
+        @run_cursor = (@run_cursor + delta).clamp(0, @running.length - 1)
+        return
+      end
       return if @selectable.empty?
       @cursor = (@cursor + delta).clamp(0, @selectable.length - 1)
       line = @selectable[@cursor]
@@ -183,17 +206,39 @@ module Muxpad
     def render
       width = columns - RIGHT_PAD
       lines = ["#{BOLD}  #{@prompt}#{RESET}", "", "  #{BOLD}❯#{RESET} #{@query}", ""]
-      lines.concat(list_lines(width))
+      lines.concat(body_lines(width))
       lines << ""
       lines.concat(detail_lines(width))
-      lines << "  #{DIM}enter launch · tab actions · ctrl-r restart · esc close#{RESET}"
+      lines << "  #{DIM}#{hint}#{RESET}"
       paint(lines)
       cursor_to(3, 5 + display_width(@query))
     end
 
+    def hint
+      switch = sidebar? ? "←/→ switch · " : ""
+      "#{switch}enter launch · tab actions · ctrl-r restart · esc close"
+    end
+
+    def sidebar? = @running.any?
+
+    # When something is running, the list region is two columns: the running
+    # sidebar on the left and the launch list on the right, joined by a divider
+    # that runs the height of the taller column.
+    def body_lines(width)
+      launch = launch_lines(width)
+      return launch unless sidebar?
+
+      launch = launch_lines(width - SIDEBAR_WIDTH - 1)
+      side = sidebar_lines(SIDEBAR_WIDTH)
+      height = [[launch.length, side.length].max, list_height].min
+      (0...height).map do |i|
+        "#{side[i] || (" " * SIDEBAR_WIDTH)}#{DIM}│#{RESET}#{launch[i]}"
+      end
+    end
+
     # Only the rows that actually exist within the viewport — no blank filler, so
     # the detail strip rises to meet a short list instead of floating below a gap.
-    def list_lines(width)
+    def launch_lines(width)
       last = [@offset + list_height, @rows.length].min
       (@offset...last).map { |i| render_row(@rows[i], width) }
     end
@@ -202,7 +247,7 @@ module Muxpad
       case row[:kind]
       when :blank then ""
       when :header then "  #{HEADER}#{row[:label]}#{RESET}"
-      when :item then render_item(row[:item], width, row.equal?(@rows[@selectable[@cursor] || -1]))
+      when :item then render_item(row[:item], width, @focus == :launch && current.equal?(row[:item]))
       end
     end
 
@@ -219,6 +264,27 @@ module Muxpad
         color = STATE_COLOR.fetch(item.state_kind, DIM)
         "  #{name}  #{DIM}#{desc}#{RESET} #{color}#{state}#{RESET}"
       end
+    end
+
+    # The left sidebar: a RUNNING header followed by each live instance, each as
+    # a coloured dot and name, padded to the fixed sidebar width.
+    def sidebar_lines(width)
+      cells = [fill(" #{HEADER}RUNNING#{RESET}", 8, width)]
+      @running.each_with_index do |item, i|
+        name = truncate(item.name.to_s, width - 3)
+        if @focus == :running && i == @run_cursor
+          cells << "#{REVERSE}#{" ● #{name}"[0, width].ljust(width)}#{RESET}"
+        else
+          cells << fill(" #{STATE_COLOR[:running]}●#{RESET} #{name}", 3 + name.length, width)
+        end
+      end
+      cells
+    end
+
+    # Pad a string carrying ANSI codes to a visible +width+ using its known
+    # printable length, so colour codes don't throw the column alignment off.
+    def fill(text, visible, width)
+      visible >= width ? text : text + (" " * (width - visible))
     end
 
     # The two-line preview: the exact command, and the directory it runs in.
@@ -293,6 +359,8 @@ module Muxpad
       case @input.getch
       when "A" then :up
       when "B" then :down
+      when "C" then :right
+      when "D" then :left
       else :ignore
       end
     end

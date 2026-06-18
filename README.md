@@ -89,13 +89,17 @@ discovery:
     - "mobile:translations:*"
 ```
 
-The palette groups entries into sections — configured tasks first, then agents,
-running instances, and finally the auto-discovered package scripts — so the
+The launch list groups things you can start into sections — configured tasks
+first, then agents, and finally the auto-discovered package scripts — so the
 things you launch most are never buried. Type to fuzzy-search across every
 section at once (name, command, and description); matching items stay grouped
-and empty sections disappear. The highlighted entry's full command shows in a
-detail strip at the bottom. Enter uses the default action, Tab opens the
-placement/action chooser, and Ctrl-R restarts a retained task or script.
+and empty sections disappear. Anything currently running (agent instances and
+orphaned scripts) lives in a separate sidebar on the left, which appears only
+while something is running; use the left and right arrows to move between the
+sidebar and the launch list. The highlighted entry's full command and the
+directory it runs in show in a detail strip at the bottom. Enter launches (or
+focuses a running instance), Tab opens the placement/action chooser, and Ctrl-R
+restarts a retained task or script.
 
 ## Tests
 

@@ -6,7 +6,9 @@ module Muxpad
   class Application
     attr_reader :config, :tmux
 
-    SECTION_ORDER = ["TASKS", "AGENTS", "RUNNING", "DISCOVERED SCRIPTS"].freeze
+    # The launch list ordering. RUNNING items are produced by #palette_items too,
+    # but the palette routes them into its sidebar rather than this list.
+    SECTION_ORDER = ["TASKS", "AGENTS", "DISCOVERED SCRIPTS"].freeze
 
     def initialize(config: Config.new, tmux: Tmux.new, discovery: Discovery.new, palette: Palette.new,
                    input: $stdin, output: $stdout)
