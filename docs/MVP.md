@@ -234,15 +234,22 @@ aliases and tmux bindings.
 Each definition can select one of three exit modes:
 
 - `close`: close the created window or pane on any exit.
-- `keep`: retain the finished pane and its output on any exit.
-- `keep-on-error`: close after exit status zero and retain the pane after a
-  nonzero exit.
+- `keep`: on any exit, print a footer and drop the pane back to an interactive
+  shell, leaving the command output in scrollback.
+- `keep-on-error`: close after exit status zero; after a nonzero exit, behave
+  like `keep` and drop to a shell.
+
+When a command exits in `keep` (or `keep-on-error` after a failure), Muxpad
+hands the pane back to a shell rather than leaving a frozen, uninteractive
+pane: the output stays scrollable and the pane is immediately usable. The pane
+is still marked finished, so it reports as `finished` in the palette and can be
+restarted in place.
 
 Tasks and discovered scripts default to `keep-on-error`. Agents default to
 `close`. Long-running servers can explicitly use `keep` so an unexpected exit
 remains visible.
 
-If a task or discovered script has finished in a retained pane, selecting it
+If a task or discovered script has finished and dropped to a shell, selecting it
 focuses that pane without erasing its output. Restart is a separate palette
 action that respawns the command in the same pane.
 

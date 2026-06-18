@@ -144,17 +144,21 @@ class IntegrationTest < MuxpadTest
 
     failure = managed("first", "task", "failure").first
     kept = managed("first", "task", "kept").first
-    assert failure.dead
-    assert kept.dead
+    assert failure.finished
+    assert kept.finished
     assert_empty managed("first", "task", "success")
     assert_empty managed("first", "task", "closed")
+
+    # Finished panes drop to an interactive shell rather than a frozen corpse.
+    refute failure.dead
+    refute kept.dead
 
     definition = @app.config.project("first").tasks.fetch("failure")
     assert_includes captured_pane(failure.id), "[Muxpad] Command failed with status 7"
     assert_includes captured_pane(kept.id), "[Muxpad] Command exited with status 0"
     @tmux.restart(failure, definition)
     sleep 0.2
-    assert managed("first", "task", "failure").first.dead
+    assert managed("first", "task", "failure").first.finished
   end
 
   def test_ad_hoc_session_has_no_project_tasks
@@ -271,7 +275,7 @@ class IntegrationTest < MuxpadTest
     sleep 0.2
 
     assert_equal "ok", File.read(marker)
-    refute managed("first", "task", "envcheck").first.dead
+    refute managed("first", "task", "envcheck").first.done?
   end
 
   def test_discovers_deduplicates_refreshes_and_launches_package_scripts

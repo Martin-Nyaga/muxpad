@@ -4,10 +4,14 @@ require "open3"
 require "shellwords"
 
 module Muxpad
-  Pane = Data.define(:id, :session, :window, :window_index, :kind, :definition_id, :name, :dead, :current_command)
+  Pane = Data.define(:id, :session, :window, :window_index, :kind, :definition_id, :name, :dead, :finished, :current_command) do
+    # A managed command has run to completion when its pane is a dropped-to
+    # shell (finished) or a retained corpse (dead).
+    def done? = dead || finished
+  end
 
   class Tmux
-    FORMAT = ['#{pane_id}', '#{session_name}', '#{window_id}', '#{window_index}', '#{@muxpad_kind}', '#{@muxpad_id}', '#{@muxpad_name}', '#{pane_dead}', '#{pane_current_command}'].join("\t")
+    FORMAT = ['#{pane_id}', '#{session_name}', '#{window_id}', '#{window_index}', '#{@muxpad_kind}', '#{@muxpad_id}', '#{@muxpad_name}', '#{pane_dead}', '#{@muxpad_finished}', '#{pane_current_command}'].join("\t")
 
     def initialize
       @prefix = [ENV.fetch("MUXPAD_TMUX", "tmux")]
@@ -67,8 +71,8 @@ module Muxpad
       output = capture("list-panes", "-s", "-t", session, "-F", FORMAT)
       output.lines(chomp: true).filter_map do |line|
         fields = line.split("\t", -1)
-        next if fields.length < 9
-        Pane.new(id: fields[0], session: fields[1], window: fields[2], window_index: fields[3], kind: fields[4], definition_id: fields[5], name: fields[6], dead: fields[7] == "1", current_command: fields[8])
+        next if fields.length < 10
+        Pane.new(id: fields[0], session: fields[1], window: fields[2], window_index: fields[3], kind: fields[4], definition_id: fields[5], name: fields[6], dead: fields[7] == "1", finished: fields[8] == "1", current_command: fields[9])
       end
     end
 
@@ -86,10 +90,10 @@ module Muxpad
       end
       pane = capture(*args).strip
       run! "set-option", "-w", "-t", pane, "automatic-rename", "off" if placement == "window"
-      run! "set-option", "-p", "-t", pane, "remain-on-exit", definition.exit_mode == "close" ? "off" : "on"
+      run! "set-option", "-p", "-t", pane, "remain-on-exit", "off"
       { "@muxpad_kind" => kind, "@muxpad_id" => definition.id, "@muxpad_name" => name,
         "@muxpad_command" => definition.command, "@muxpad_directory" => directory,
-        "@muxpad_exit_mode" => definition.exit_mode }.each do |key, value|
+        "@muxpad_exit_mode" => definition.exit_mode, "@muxpad_finished" => "0" }.each do |key, value|
         run! "set-option", "-p", "-t", pane, key, value
       end
       run! "select-pane", "-t", pane, "-T", name
@@ -105,11 +109,12 @@ module Muxpad
     end
 
     def restart(pane, definition)
-      raise Error, "#{pane.name} is still running" unless pane.dead
+      raise Error, "#{pane.name} is still running" unless pane.done?
       directory = capture("show-options", "-pqv", "-t", pane.id, "@muxpad_directory").strip
-      run! "set-option", "-p", "-t", pane.id, "remain-on-exit", definition.exit_mode == "close" ? "off" : "on"
+      run! "set-option", "-p", "-t", pane.id, "remain-on-exit", "off"
       run! "set-option", "-p", "-t", pane.id, "@muxpad_command", definition.command
       run! "set-option", "-p", "-t", pane.id, "@muxpad_exit_mode", definition.exit_mode
+      run! "set-option", "-p", "-t", pane.id, "@muxpad_finished", "0"
       run! "respawn-pane", "-k", "-t", pane.id, "-c", directory, wrapped_command(definition.command, definition.exit_mode)
       run! "select-pane", "-t", pane.id, "-T", pane.name
       focus(pane)
@@ -135,12 +140,15 @@ module Muxpad
     private
 
     def wrapped_command(command, exit_mode)
+      tmux = @prefix.map { |part| Shellwords.escape(part) }.join(" ")
+      # Mark the pane finished and hand it back to an interactive shell so the
+      # output stays scrollable and the user can keep working in place.
+      to_shell = "#{tmux} set-option -p -t \"$TMUX_PANE\" @muxpad_finished 1; exec \"${SHELL:-/bin/sh}\""
       inner = case exit_mode
       when "keep-on-error"
-        tmux = @prefix.map { |part| Shellwords.escape(part) }.join(" ")
-        "( #{command}\n); status=$?; if [ $status -eq 0 ]; then #{tmux} kill-pane -t \"$TMUX_PANE\"; else #{failure_footer}; fi; exit $status"
+        "( #{command}\n); status=$?; if [ $status -eq 0 ]; then #{tmux} kill-pane -t \"$TMUX_PANE\"; else #{failure_footer}; #{to_shell}; fi"
       when "keep"
-        "( #{command}\n); status=$?; #{failure_footer(always: true)}; exit $status"
+        "( #{command}\n); status=$?; #{failure_footer(always: true)}; #{to_shell}"
       when "close"
         "exec #{command}"
       end
@@ -149,7 +157,7 @@ module Muxpad
 
     def failure_footer(always: false)
       label = always ? "Command exited" : "Command failed"
-      "printf '\\n[Muxpad] #{label} with status %s. Output retained; use prefix + [ to scroll.\\n' \"$status\" >&2"
+      "printf '\\n[Muxpad] #{label} with status %s. Dropped to a shell; scroll output with prefix + [.\\n' \"$status\" >&2"
     end
 
     def sync_path(session)

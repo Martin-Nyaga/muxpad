@@ -53,7 +53,9 @@ vertical split, or a horizontal split. The default is a new window.
 ## Exit mode
 
 What happens to a Muxpad-created window or pane when its command exits:
-`close`, `keep`, or `keep-on-error`.
+`close` (close the pane), `keep` (drop back to an interactive shell with the
+output retained in scrollback), or `keep-on-error` (close on success, drop to a
+shell on failure).
 
 ## Muxpad-managed instance
 

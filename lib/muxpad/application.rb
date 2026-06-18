@@ -159,12 +159,12 @@ module Muxpad
       rows = []
       project&.tasks&.each_value do |task|
         pane = panes.find { |item| item.kind == "task" && item.definition_id == task.id }
-        state = pane ? (pane.dead ? "finished" : "running") : "not running"
+        state = pane ? (pane.done? ? "finished" : "running") : "not running"
         rows << palette_row("task:#{task.id}", "TASK", task.name, task.description, state)
       end
       scripts.each_value do |script|
         pane = panes.find { |item| item.kind == "script" && item.definition_id == script.id }
-        state = pane ? (pane.dead ? "finished" : "running") : "not running"
+        state = pane ? (pane.done? ? "finished" : "running") : "not running"
         rows << palette_row("script:#{script.id}", "SCRIPT", script.name, script.description, state)
       end
       config.agents.each_value do |agent|
@@ -172,10 +172,10 @@ module Muxpad
         status = if !agent.enabled then "disabled" elsif available then "available" else "unavailable: missing #{agent.executable}" end
         rows << palette_row("agent:#{agent.id}", "AGENT", agent.name, agent.description, status)
       end
-      panes.select { |pane| pane.kind == "agent" && !pane.dead }.each do |pane|
+      panes.select { |pane| pane.kind == "agent" && !pane.done? }.each do |pane|
         rows << palette_row("running:#{pane.id}", "RUNNING", pane.name, "window #{pane.window_index}; process #{pane.current_command}", "running")
       end
-      panes.select { |pane| pane.kind == "script" && !pane.dead && !scripts.key?(pane.definition_id) }.each do |pane|
+      panes.select { |pane| pane.kind == "script" && !pane.done? && !scripts.key?(pane.definition_id) }.each do |pane|
         rows << palette_row("running:#{pane.id}", "RUNNING", pane.name, "removed package script; window #{pane.window_index}", "running")
       end
       rows
@@ -225,7 +225,7 @@ module Muxpad
       actions = [["window", "New window"], ["vertical", "Vertical split"], ["horizontal", "Horizontal split"]]
       if %w[task script].include?(kind)
         pane = tmux.panes(session).find { |item| item.kind == kind && item.definition_id == id }
-        actions << ["restart", "Restart in existing pane"] if pane&.dead
+        actions << ["restart", "Restart in existing pane"] if pane&.done?
       end
       input = actions.map { |token, label| "#{token}\t#{label}" }.join("\n") + "\n"
       command = ["fzf", "--delimiter=\t", "--with-nth=2", "--layout=reverse", "--border=rounded",
