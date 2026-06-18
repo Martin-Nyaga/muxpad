@@ -258,8 +258,10 @@ module Muxpad
       desc_width = [avail - @name_width - 2 - state.length - 1, 0].max
       desc = truncate(item.description.to_s, desc_width).ljust(desc_width)
       if selected
+        # Keep the text within the content width, but extend the highlight bar
+        # through the reserved right padding so it reaches the popup edge.
         line = "  #{name}  #{desc} #{state}"
-        "#{REVERSE}#{line[0, width].ljust(width)}#{RESET}"
+        "#{REVERSE}#{line[0, width].ljust(width + RIGHT_PAD)}#{RESET}"
       else
         color = STATE_COLOR.fetch(item.state_kind, DIM)
         "  #{name}  #{DIM}#{desc}#{RESET} #{color}#{state}#{RESET}"
