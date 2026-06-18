@@ -62,7 +62,7 @@ class CliTest < MuxpadTest
     assert_match(/unknown command/, error.string)
   end
 
-  def test_menu_inside_tmux_opens_a_popup_instead_of_running_fzf_in_the_pane
+  def test_menu_inside_tmux_opens_a_popup_instead_of_rendering_the_palette_in_the_pane
     app = FakeApplication.new(inside: true)
     cli = Muxpad::CLI.new(["menu"], output: StringIO.new, error: StringIO.new)
     cli.instance_variable_set(:@application, app)

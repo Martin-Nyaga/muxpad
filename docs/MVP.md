@@ -58,7 +58,7 @@ before Muxpad is rebuilt as a single cross-platform binary.
 ## Audience And Environment
 
 The MVP is for one user in the current WSL environment. It may depend on the
-installed tmux and `fzf` commands. Ruby and standard-library YAML are acceptable
+installed tmux command. Ruby and standard-library YAML are acceptable
 because the prototype will be discarded.
 
 The eventual product targets Unix-like systems, initially Linux, macOS, and
@@ -312,7 +312,8 @@ The MVP does not:
 
 ## Dependencies And Risks
 
-- Tmux popup support and `fzf` are required for the intended palette experience.
+- Tmux popup support is required for the intended palette experience. The
+  palette itself is a self-contained terminal UI with no external dependencies.
 - Tmux metadata must remain reliable when users move, rename, or kill windows
   and panes manually. Muxpad must query tmux rather than trust a separate cache.
 - Shell commands and working directories require careful quoting, but the MVP

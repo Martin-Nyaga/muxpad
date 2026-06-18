@@ -3,6 +3,22 @@
 require_relative "test_helper"
 
 class IntegrationTest < MuxpadTest
+  # Stands in for the interactive Palette so menu flows can be driven headlessly.
+  class StubPalette
+    def initialize(select: nil, choose: nil)
+      @select = select
+      @choose = choose
+    end
+
+    def select(items, section_order:)
+      @select.respond_to?(:call) ? @select.call(items) : @select
+    end
+
+    def choose(options, title:)
+      @choose.respond_to?(:call) ? @choose.call(options) : @choose
+    end
+  end
+
   def setup
     super
     ENV.delete("TMUX")
@@ -218,26 +234,26 @@ class IntegrationTest < MuxpadTest
 
   def test_palette_labels_availability_running_instances_and_alternate_action
     @app.start(project_id: "first", empty: true, attach: false)
-    bin = File.join(@tmp, "bin")
-    FileUtils.mkdir_p(bin)
-    fzf = File.join(bin, "fzf")
-    File.write(fzf, <<~SH)
-      #!/bin/sh
-      input=$(cat)
-      case "$input" in
-        *"Vertical split"*) printf 'vertical\\tVertical split\\n' ;;
-        *) printf 'tab\\nagent:codex\\tignored\\n' ;;
-      esac
-    SH
-    FileUtils.chmod(0o755, fzf)
-    ENV["PATH"] = "#{bin}:#{ENV.fetch('PATH')}"
 
-    Dir.chdir(@project) { @app.menu(attach: false) }
-    rows = @app.send(:palette_rows, "first")
+    # Selecting an agent with Tab opens the action menu; choosing "vertical"
+    # launches it as a split rather than a new window.
+    palette = StubPalette.new(select: ["tab", "agent:codex"], choose: "vertical")
+    Dir.chdir(@project) { app_with(palette).menu(attach: false) }
 
-    assert rows.any? { |row| row.include?("\tTASK") && row.include?("API server") }
-    assert rows.any? { |row| row.include?("\tAGENT") && row.include?("Claude Code") && row.include?("[disabled]") }
-    assert rows.any? { |row| row.include?("\tRUNNING") && row.include?("Codex") && row.match?(/window \d+/) && !row.include?("window @") && row.include?("[running]") }
+    items = @app.send(:palette_items, "first")
+    task = items.find { |item| item.token == "task:api" }
+    assert_equal ["TASKS", "API server"], [task.section, task.name]
+
+    claude = items.find { |item| item.token == "agent:claude" }
+    assert_equal ["AGENTS", "disabled", :disabled], [claude.section, claude.state, claude.state_kind]
+
+    running = items.find { |item| item.token.start_with?("running:") }
+    assert_equal "RUNNING", running.section
+    assert_match(/Codex/, running.name)
+    assert_match(/window \d+/, running.description)
+    refute_includes running.description, "window @"
+    assert_equal "running", running.state
+
     assert_equal 2, pane_ids("first").length
     assert_equal 1, windows("first").length
   end
@@ -259,20 +275,14 @@ class IntegrationTest < MuxpadTest
     assert_equal "", @tmux.project_context("ordinary")
     actual_path, = Open3.capture2("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "display-message", "-p", "-t", "ordinary", '#{pane_current_path}')
     assert_equal actual_path.strip, @tmux.session_root("ordinary")
-    rows = @app.send(:palette_rows, "ordinary")
-    refute rows.any? { |row| row.include?("\tTASK") }
-    assert_equal 3, rows.count { |row| row.include?("\tAGENT") }
+    items = @app.send(:palette_items, "ordinary")
+    refute items.any? { |item| item.section == "TASKS" }
+    assert_equal 3, items.count { |item| item.section == "AGENTS" }
   end
 
   def test_canceling_menu_outside_tmux_removes_a_new_session_and_does_not_attach
-    bin = File.join(@tmp, "cancel-bin")
-    FileUtils.mkdir_p(bin)
-    fzf = File.join(bin, "fzf")
-    File.write(fzf, "#!/bin/sh\nexit 130\n")
-    FileUtils.chmod(0o755, fzf)
-    ENV["PATH"] = "#{bin}:#{ENV.fetch('PATH')}"
-
-    Dir.chdir(@project) { @app.menu(attach: true) }
+    palette = StubPalette.new(select: nil)
+    Dir.chdir(@project) { app_with(palette).menu(attach: true) }
 
     refute @tmux.session_exists?("first")
   end
@@ -296,12 +306,13 @@ class IntegrationTest < MuxpadTest
 
   def test_discovers_deduplicates_refreshes_and_launches_package_scripts
     @app.start(project_id: "first", empty: true, attach: false)
-    rows = @app.send(:palette_rows, "first")
+    items = @app.send(:palette_items, "first")
 
-    assert rows.any? { |row| row.start_with?("script:rootcheck\tSCRIPT") }
-    assert rows.any? { |row| row.start_with?("script:app-mobile:dev\tSCRIPT") }
-    refute rows.any? { |row| row.start_with?("script:duplicate\t") }
-    refute rows.any? { |row| row.include?("app-mobile:noise:internal") }
+    rootcheck = items.find { |item| item.token == "script:rootcheck" }
+    assert_equal "DISCOVERED SCRIPTS", rootcheck.section
+    assert items.any? { |item| item.token == "script:app-mobile:dev" }
+    refute items.any? { |item| item.token == "script:duplicate" }
+    refute items.any? { |item| item.token.include?("noise") }
     assert_empty managed("first", "script", "rootcheck")
 
     @app.send(:handle_selection, "first", ["enter", "script:rootcheck"])
@@ -313,7 +324,7 @@ class IntegrationTest < MuxpadTest
     package = JSON.parse(File.read(File.join(@project, "package.json")))
     package.fetch("scripts")["added"] = "sleep 30"
     File.write(File.join(@project, "package.json"), JSON.generate(package))
-    assert @app.send(:palette_rows, "first").any? { |row| row.start_with?("script:added\tSCRIPT") }
+    assert @app.send(:palette_items, "first").any? { |item| item.token == "script:added" }
   end
 
   def test_discovers_scripts_in_an_ad_hoc_session
@@ -323,11 +334,15 @@ class IntegrationTest < MuxpadTest
 
     Dir.chdir(directory) do
       session = @app.start(attach: false)
-      assert @app.send(:palette_rows, session).any? { |row| row.start_with?("script:hello\tSCRIPT") }
+      assert @app.send(:palette_items, session).any? { |item| item.token == "script:hello" }
     end
   end
 
   private
+
+  def app_with(palette)
+    Muxpad::Application.new(config: Muxpad::Config.new, tmux: @tmux, palette:)
+  end
 
   def windows(session)
     stdout, = Open3.capture2("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "list-windows", "-t", session, "-F", '#{window_name}')

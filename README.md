@@ -32,7 +32,6 @@ already use.
 
 - Ruby 3.2 or newer
 - tmux 3.3 or newer
-- fzf
 
 ## Setup
 
@@ -90,8 +89,13 @@ discovery:
     - "mobile:translations:*"
 ```
 
-In the palette, Enter uses the default action, Tab opens the placement/action
-chooser, and Ctrl-R restarts a retained task or script.
+The palette groups entries into sections — configured tasks first, then agents,
+running instances, and finally the auto-discovered package scripts — so the
+things you launch most are never buried. Type to fuzzy-search across every
+section at once (name, command, and description); matching items stay grouped
+and empty sections disappear. The highlighted entry's full command shows in a
+detail strip at the bottom. Enter uses the default action, Tab opens the
+placement/action chooser, and Ctrl-R restarts a retained task or script.
 
 ## Tests
 

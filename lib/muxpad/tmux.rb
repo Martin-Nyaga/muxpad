@@ -130,7 +130,7 @@ module Muxpad
 
     def popup_menu(program)
       command = "MUXPAD_POPUP=1 #{Shellwords.escape(program)} menu"
-      run! "display-popup", "-E", "-w", "90%", "-h", "75%", "-T", " Muxpad ", command
+      run! "display-popup", "-E", "-w", "88", "-h", "22", "-T", " Muxpad ", command
     end
 
     def kill_session(session)

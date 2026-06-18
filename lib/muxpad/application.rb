@@ -6,10 +6,14 @@ module Muxpad
   class Application
     attr_reader :config, :tmux
 
-    def initialize(config: Config.new, tmux: Tmux.new, discovery: Discovery.new, input: $stdin, output: $stdout)
+    SECTION_ORDER = ["TASKS", "AGENTS", "RUNNING", "DISCOVERED SCRIPTS"].freeze
+
+    def initialize(config: Config.new, tmux: Tmux.new, discovery: Discovery.new, palette: Palette.new,
+                   input: $stdin, output: $stdout)
       @config = config
       @tmux = tmux
       @discovery = discovery
+      @palette = palette
       @input = input
       @output = output
     end
@@ -34,7 +38,7 @@ module Muxpad
 
     def menu(attach: true)
       session, created = session_for_command
-      selection = palette(session)
+      selection = @palette.select(palette_items(session), section_order: SECTION_ORDER)
       unless selection
         tmux.kill_session(session) if created
         return session
@@ -136,59 +140,64 @@ module Muxpad
       tmux.focus(shell) if shell
     end
 
-    def palette(session)
-      rows = palette_rows(session)
-      command = ["fzf", "--delimiter=\t", "--with-nth=2", "--expect=enter,tab,ctrl-r",
-                 "--layout=reverse", "--border=rounded", "--padding=1", "--info=inline", "--scrollbar=│",
-                 "--prompt=Muxpad> ", "--pointer=>", "--header=Enter default | Tab actions | Ctrl-R restart"]
-      stdout, status = Open3.capture2(*command, stdin_data: rows.join("\n") + "\n")
-      raise Error, "fzf is required for the Muxpad palette" unless status.success? || status.exitstatus == 130
-      lines = stdout.lines(chomp: true)
-      return if lines.empty?
-      action = lines.length > 1 ? lines[0] : "enter"
-      row = lines[-1]
-      [action, row.split("\t", 2).first]
-    rescue Errno::ENOENT
-      raise Error, "fzf is required for the Muxpad palette"
-    end
-
-    def palette_rows(session)
+    # The structured palette model, ordered to match SECTION_ORDER: configured
+    # tasks first so they are never buried, then agents, live agent/script
+    # instances, and finally the noisy auto-discovered scripts.
+    def palette_items(session)
       project = project_for_session(session)
       panes = tmux.panes(session)
       scripts = discovered_scripts(session, project)
-      rows = []
+      root = project&.root || tmux.session_root(session)
+      items = []
       project&.tasks&.each_value do |task|
         pane = panes.find { |item| item.kind == "task" && item.definition_id == task.id }
-        state = pane ? (pane.done? ? "finished" : "running") : "not running"
-        rows << palette_row("task:#{task.id}", "TASK", task.name, task.description, state)
+        items << launchable_item("task:#{task.id}", "TASKS", task, pane, root)
+      end
+      config.agents.each_value do |agent|
+        items << agent_item(agent, root)
+      end
+      panes.select { |pane| pane.kind == "agent" && !pane.done? }.each do |pane|
+        items << running_item(pane, "window #{pane.window_index} · #{pane.current_command}")
+      end
+      panes.select { |pane| pane.kind == "script" && !pane.done? && !scripts.key?(pane.definition_id) }.each do |pane|
+        items << running_item(pane, "removed package script · window #{pane.window_index}")
       end
       scripts.each_value do |script|
         pane = panes.find { |item| item.kind == "script" && item.definition_id == script.id }
-        state = pane ? (pane.done? ? "finished" : "running") : "not running"
-        rows << palette_row("script:#{script.id}", "SCRIPT", script.name, script.description, state)
+        items << launchable_item("script:#{script.id}", "DISCOVERED SCRIPTS", script, pane, root)
       end
-      config.agents.each_value do |agent|
-        available = agent.enabled && executable?(agent.executable)
-        status = if !agent.enabled then "disabled" elsif available then "available" else "unavailable: missing #{agent.executable}" end
-        rows << palette_row("agent:#{agent.id}", "AGENT", agent.name, agent.description, status)
-      end
-      panes.select { |pane| pane.kind == "agent" && !pane.done? }.each do |pane|
-        rows << palette_row("running:#{pane.id}", "RUNNING", pane.name, "window #{pane.window_index}; process #{pane.current_command}", "running")
-      end
-      panes.select { |pane| pane.kind == "script" && !pane.done? && !scripts.key?(pane.definition_id) }.each do |pane|
-        rows << palette_row("running:#{pane.id}", "RUNNING", pane.name, "removed package script; window #{pane.window_index}", "running")
-      end
-      rows
+      items
     end
 
-    def palette_row(token, kind, name, description, state)
-      visible = format("%-9s  %-22s  %-48s  [%s]", kind, truncate(name, 22), truncate(description, 48), state)
-      "#{token}\t#{visible}"
+    def launchable_item(token, section, definition, pane, root)
+      state, kind = if pane.nil? then ["not running", :idle]
+      elsif pane.done? then ["finished", :finished]
+      else ["running", :running]
+      end
+      Item.new(token:, section:, name: definition.name, description: definition.description,
+               command: definition.command, directory: resolve_directory(definition, root),
+               state:, state_kind: kind)
     end
 
-    def truncate(value, width)
-      value = value.to_s
-      value.length > width ? "#{value[0, width - 3]}..." : value
+    def agent_item(agent, root)
+      available = agent.enabled && executable?(agent.executable)
+      state, kind = if !agent.enabled then ["disabled", :disabled]
+      elsif available then ["available", :available]
+      else ["unavailable: missing #{agent.executable}", :unavailable]
+      end
+      Item.new(token: "agent:#{agent.id}", section: "AGENTS", name: agent.name,
+               description: agent.description, command: agent.command, directory: root,
+               state:, state_kind: kind)
+    end
+
+    def running_item(pane, description)
+      Item.new(token: "running:#{pane.id}", section: "RUNNING", name: pane.name,
+               description:, command: pane.current_command, directory: nil,
+               state: "running", state_kind: :running)
+    end
+
+    def resolve_directory(definition, root)
+      definition.directory ? File.expand_path(definition.directory, root) : root
     end
 
     def handle_selection(session, selection)
@@ -199,7 +208,7 @@ module Muxpad
         return tmux.focus(pane) if pane
         raise Error, "that agent instance is no longer running"
       end
-      action = action_palette(session, kind, id) if action == "tab"
+      action = action_menu(session, kind, id) if action == "tab"
       return unless action
       placement = action if Config::PLACEMENTS.include?(action)
       if kind == "task"
@@ -221,19 +230,13 @@ module Muxpad
       end
     end
 
-    def action_palette(session, kind, id)
+    def action_menu(session, kind, id)
       actions = [["window", "New window"], ["vertical", "Vertical split"], ["horizontal", "Horizontal split"]]
       if %w[task script].include?(kind)
         pane = tmux.panes(session).find { |item| item.kind == kind && item.definition_id == id }
         actions << ["restart", "Restart in existing pane"] if pane&.done?
       end
-      input = actions.map { |token, label| "#{token}\t#{label}" }.join("\n") + "\n"
-      command = ["fzf", "--delimiter=\t", "--with-nth=2", "--layout=reverse", "--border=rounded",
-                 "--padding=1", "--prompt=Action> ", "--header=Choose placement or action"]
-      stdout, status = Open3.capture2(*command, stdin_data: input)
-      return if status.exitstatus == 130 || stdout.empty?
-      raise Error, "fzf action picker failed" unless status.success?
-      stdout.split("\t", 2).first
+      @palette.choose(actions, title: "Choose placement or action")
     end
 
     def discovered_scripts(session, project)
