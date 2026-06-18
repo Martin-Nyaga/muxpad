@@ -13,13 +13,14 @@ module Muxpad
   # Application. #select returns [action, token] (action is "enter", "tab" or
   # "ctrl-r") or nil when cancelled. #choose returns a chosen token or nil.
   class Palette
-    # Non-list lines: title, blank, search, blank, blank, command, directory, hint.
-    CHROME = 8
+    # Non-list lines above + below the list: title, blank, search, blank, then
+    # blank, action heading, command, directory, rule, hint.
+    CHROME = 10
     MIN_LIST = 3
     RIGHT_PAD = 2 # blank columns kept clear on the right edge
     NAME_MIN = 10
     NAME_MAX = 24
-    RUNNING_SECTION = "RUNNING" # split into the left sidebar rather than the launch list
+    RUNNING_SECTION = "Running" # split into the left sidebar rather than the launch list
     SIDEBAR_WIDTH = 20
 
     RESET = "\e[0m"
@@ -103,7 +104,7 @@ module Muxpad
       when Array then edit { @query << key.last } # [:char, c]
       when :enter then return [selection("enter")] if current
       when :tab then return [selection("tab")] if @focus == :launch && current
-      when :restart then return [selection("ctrl-r")] if @focus == :launch && current
+      when :restart then return [selection("ctrl-r")] if restartable?
       when :escape, :cancel then return [nil]
       end
       nil
@@ -205,18 +206,36 @@ module Muxpad
 
     def render
       width = columns - RIGHT_PAD
-      lines = ["#{BOLD}  #{@prompt}#{RESET}", "", "  #{BOLD}❯#{RESET} #{@query}", ""]
-      lines.concat(body_lines(width))
-      lines << ""
-      lines.concat(detail_lines(width))
-      lines << "  #{DIM}#{hint}#{RESET}"
-      paint(lines)
+      top = ["#{BOLD}  #{@prompt}#{RESET}", "", "  #{BOLD}❯#{RESET} #{@query}", ""]
+      body = body_lines(width)
+      footer = ["", *detail_lines(width),
+                "  #{DIM}#{"─" * [width - 2, 0].max}#{RESET}",
+                "  #{DIM}#{hint}#{RESET}"]
+      # Pin the detail/actions footer to the bottom of the popup so it stays put
+      # while the list grows and shrinks during search.
+      pad = [rows - top.length - body.length - footer.length, 0].max
+      paint(top + body + ([""] * pad) + footer)
       cursor_to(3, 5 + display_width(@query))
+    end
+
+    # Enter focuses anything that already has a pane (running or finished),
+    # otherwise it starts the command fresh.
+    def verb
+      item = current
+      item && %i[running finished].include?(item.state_kind) ? "Focus" : "Run"
+    end
+
+    # Restart only makes sense for a finished task/script with a pane to respawn.
+    def restartable?
+      @focus == :launch && current&.state_kind == :finished
     end
 
     def hint
       switch = sidebar? ? "←/→ switch · " : ""
-      "#{switch}enter launch · tab actions · ctrl-r restart · esc close"
+      return "#{switch}enter focus · esc close" if @focus == :running
+      actions = ["enter #{verb.downcase}", "tab actions"]
+      actions << "ctrl-r restart" if restartable?
+      "#{switch}#{actions.join(" · ")} · esc close"
     end
 
     def sidebar? = @running.any?
@@ -268,10 +287,10 @@ module Muxpad
       end
     end
 
-    # The left sidebar: a RUNNING header followed by each live instance, each as
+    # The left sidebar: a Running header followed by each live instance, each as
     # a coloured dot and name, padded to the fixed sidebar width.
     def sidebar_lines(width)
-      cells = [fill(" #{HEADER}RUNNING#{RESET}", 8, width)]
+      cells = [fill(" #{HEADER}Running#{RESET}", 8, width)]
       @running.each_with_index do |item, i|
         name = truncate(item.name.to_s, width - 3)
         if @focus == :running && i == @run_cursor
@@ -289,17 +308,19 @@ module Muxpad
       visible >= width ? text : text + (" " * (width - visible))
     end
 
-    # The two-line preview: the exact command, and the directory it runs in.
+    # The preview: a Run/Focus heading making the action obvious, then the exact
+    # command, then the directory it runs in.
     def detail_lines(width)
       item = current
-      return ["", ""] unless item
+      return ["", "", ""] unless item
+      heading = "  #{DIM}This will #{verb.downcase}:#{RESET}"
       command = "  #{DIM}$ #{truncate(item.command.to_s, width - 4)}#{RESET}"
       directory = if item.directory.to_s.empty?
         ""
       else
         "  #{DIM}in #{truncate(abbreviate(item.directory), width - 5)}#{RESET}"
       end
-      [command, directory]
+      [heading, command, directory]
     end
 
     def abbreviate(path)
@@ -392,10 +413,13 @@ module Muxpad
       winsize ? winsize[1] : 80
     end
 
+    def rows
+      winsize ? winsize[0] : 24
+    end
+
     # The list fills whatever vertical space the popup gives us (minus chrome),
     # so the window grows with the popup and never leaves a gap below itself.
     def list_height
-      rows = winsize ? winsize[0] : 24
       [rows - CHROME, MIN_LIST].max
     end
 

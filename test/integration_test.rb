@@ -129,7 +129,7 @@ class IntegrationTest < MuxpadTest
     end
     assert_equal 1, managed("first", "task", "api").length
     agents = managed("first", "agent", "codex")
-    assert_equal ["Codex", "Codex 2"], agents.map(&:name).sort
+    assert_equal ["codex", "codex 2"], agents.map(&:name).sort
     assert_equal 3, windows("first").length
     assert_equal 4, pane_ids("first").length
   end
@@ -139,13 +139,13 @@ class IntegrationTest < MuxpadTest
     Dir.chdir(@project) do
       3.times { @app.agent("codex", attach: false) }
     end
-    second = managed("first", "agent", "codex").find { |pane| pane.name == "Codex 2" }
+    second = managed("first", "agent", "codex").find { |pane| pane.name == "codex 2" }
     system("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "kill-pane", "-t", second.id)
 
     Dir.chdir(@project) { @app.agent("codex", attach: false) }
 
     names = managed("first", "agent", "codex").map(&:name)
-    assert_equal ["Codex", "Codex 2", "Codex 3"], names.sort
+    assert_equal ["codex", "codex 2", "codex 3"], names.sort
   end
 
   def test_exit_modes_and_restart
@@ -229,7 +229,7 @@ class IntegrationTest < MuxpadTest
   def test_direct_agent_creation_launches_project_defaults
     Dir.chdir(@project) { @app.agent("codex", attach: false) }
 
-    assert_equal ["API server", "Codex", "Mobile app", "shell"], windows("first").sort
+    assert_equal ["API server", "Mobile app", "codex", "shell"], windows("first").sort
   end
 
   def test_palette_labels_availability_running_instances_and_alternate_action
@@ -242,14 +242,14 @@ class IntegrationTest < MuxpadTest
 
     items = @app.send(:palette_items, "first")
     task = items.find { |item| item.token == "task:api" }
-    assert_equal ["TASKS", "API server"], [task.section, task.name]
+    assert_equal ["Tasks", "API server"], [task.section, task.name]
 
     claude = items.find { |item| item.token == "agent:claude" }
-    assert_equal ["AGENTS", "disabled", :disabled], [claude.section, claude.state, claude.state_kind]
+    assert_equal ["Agents", "disabled", :disabled], [claude.section, claude.state, claude.state_kind]
 
     running = items.find { |item| item.token.start_with?("running:") }
-    assert_equal "RUNNING", running.section
-    assert_match(/Codex/, running.name)
+    assert_equal "Running", running.section
+    assert_match(/codex/, running.name)
     assert_match(/window \d+/, running.description)
     refute_includes running.description, "window @"
     assert_equal "running", running.state
@@ -276,8 +276,8 @@ class IntegrationTest < MuxpadTest
     actual_path, = Open3.capture2("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "display-message", "-p", "-t", "ordinary", '#{pane_current_path}')
     assert_equal actual_path.strip, @tmux.session_root("ordinary")
     items = @app.send(:palette_items, "ordinary")
-    refute items.any? { |item| item.section == "TASKS" }
-    assert_equal 3, items.count { |item| item.section == "AGENTS" }
+    refute items.any? { |item| item.section == "Tasks" }
+    assert_equal 3, items.count { |item| item.section == "Agents" }
   end
 
   def test_canceling_menu_outside_tmux_removes_a_new_session_and_does_not_attach
@@ -309,7 +309,7 @@ class IntegrationTest < MuxpadTest
     items = @app.send(:palette_items, "first")
 
     rootcheck = items.find { |item| item.token == "script:rootcheck" }
-    assert_equal "DISCOVERED SCRIPTS", rootcheck.section
+    assert_equal "Discovered scripts", rootcheck.section
     assert items.any? { |item| item.token == "script:app-mobile:dev" }
     refute items.any? { |item| item.token == "script:duplicate" }
     refute items.any? { |item| item.token.include?("noise") }

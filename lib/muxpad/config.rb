@@ -13,9 +13,9 @@ module Muxpad
     PLACEMENTS = %w[window vertical horizontal].freeze
     EXIT_MODES = %w[close keep keep-on-error].freeze
     BUILTIN_AGENTS = {
-      "claude" => { "name" => "Claude Code", "description" => "Anthropic coding agent", "command" => "claude", "executable" => "claude" },
-      "codex" => { "name" => "Codex", "description" => "OpenAI coding agent", "command" => "codex", "executable" => "codex" },
-      "opencode" => { "name" => "OpenCode", "description" => "Open-source coding agent", "command" => "opencode", "executable" => "opencode" }
+      "claude" => { "name" => "claude", "description" => "anthropic coding agent", "command" => "claude", "executable" => "claude" },
+      "codex" => { "name" => "codex", "description" => "openai coding agent", "command" => "codex", "executable" => "codex" },
+      "opencode" => { "name" => "opencode", "description" => "open-source coding agent", "command" => "opencode", "executable" => "opencode" }
     }.freeze
 
     attr_reader :projects, :agents

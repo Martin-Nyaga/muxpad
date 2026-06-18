@@ -6,9 +6,9 @@ module Muxpad
   class Application
     attr_reader :config, :tmux
 
-    # The launch list ordering. RUNNING items are produced by #palette_items too,
+    # The launch list ordering. Running items are produced by #palette_items too,
     # but the palette routes them into its sidebar rather than this list.
-    SECTION_ORDER = ["TASKS", "AGENTS", "DISCOVERED SCRIPTS"].freeze
+    SECTION_ORDER = ["Tasks", "Agents", "Discovered scripts"].freeze
 
     def initialize(config: Config.new, tmux: Tmux.new, discovery: Discovery.new, palette: Palette.new,
                    input: $stdin, output: $stdout)
@@ -153,7 +153,7 @@ module Muxpad
       items = []
       project&.tasks&.each_value do |task|
         pane = panes.find { |item| item.kind == "task" && item.definition_id == task.id }
-        items << launchable_item("task:#{task.id}", "TASKS", task, pane, root)
+        items << launchable_item("task:#{task.id}", "Tasks", task, pane, root)
       end
       config.agents.each_value do |agent|
         items << agent_item(agent, root)
@@ -166,7 +166,7 @@ module Muxpad
       end
       scripts.each_value do |script|
         pane = panes.find { |item| item.kind == "script" && item.definition_id == script.id }
-        items << launchable_item("script:#{script.id}", "DISCOVERED SCRIPTS", script, pane, root)
+        items << launchable_item("script:#{script.id}", "Discovered scripts", script, pane, root)
       end
       items
     end
@@ -187,13 +187,13 @@ module Muxpad
       elsif available then ["available", :available]
       else ["unavailable: missing #{agent.executable}", :unavailable]
       end
-      Item.new(token: "agent:#{agent.id}", section: "AGENTS", name: agent.name,
+      Item.new(token: "agent:#{agent.id}", section: "Agents", name: agent.name,
                description: agent.description, command: agent.command, directory: root,
                state:, state_kind: kind)
     end
 
     def running_item(pane, description)
-      Item.new(token: "running:#{pane.id}", section: "RUNNING", name: pane.name,
+      Item.new(token: "running:#{pane.id}", section: "Running", name: pane.name,
                description:, command: pane.current_command, directory: nil,
                state: "running", state_kind: :running)
     end

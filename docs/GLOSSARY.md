@@ -33,7 +33,7 @@ Launching an agent creates a new instance by default.
 ## Agent instance
 
 One running copy of an agent in a tmux window or pane. Multiple instances use
-numbered names such as `Codex`, `Codex 2`, and `Codex 3`.
+numbered names such as `codex`, `codex 2`, and `codex 3`.
 
 ## Palette
 

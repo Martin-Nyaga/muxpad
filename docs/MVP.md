@@ -37,7 +37,7 @@ before Muxpad is rebuilt as a single cross-platform binary.
 
 **Agent instance**
 : One running copy of an agent in a tmux window or pane. Multiple instances use
-  numbered names such as `Codex`, `Codex 2`, and `Codex 3`.
+  numbered names such as `codex`, `codex 2`, and `codex 3`.
 
 **Palette**
 : The unified, searchable list of tasks, agents, and running agent instances.
