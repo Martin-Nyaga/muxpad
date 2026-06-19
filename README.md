@@ -2,31 +2,38 @@
   <img src="assets/logo.svg" alt="muxpad" width="420">
 </p>
 
-# Muxpad
+<p align="center">
+    A project-aware command palette and launcher for tmux.
+</p>
 
-Muxpad is a project-aware command palette and launcher for tmux. It puts your
-configured project tasks, discovered package scripts, and coding agents in one
-searchable menu. From there, you can launch them into clearly named tmux windows
-or splits, focus an existing process, and restart a retained command.
+# About
 
-It is intentionally a layer on top of tmux. Tmux continues to own sessions,
-windows, panes, processes, and navigation; Muxpad adds project context, useful
-names, discovery, and a faster way to launch and revisit work.
+Muxpad puts your configured project tasks, discovered package scripts, and
+coding agents in a fuzzy-searchable menu within tmux, so you can quickly launch,
+find, and switch between them.
 
-Muxpad is currently an early prototype.
+<p align="center">
+  <img src="assets/screenshot.png" alt="The Muxpad palette" width="900">
+</p>
 
-## Motivation
+## How it works
 
-Application development already involves more moving parts than it used to:
-servers, workers, databases, mobile tooling, test watchers, and supporting
-services. The applications themselves keep getting more complex. Coding agents
-add another dimension because it is now useful to run *many* of them at once,
-often across several projects and alongside all of those existing processes.
+Muxpad is deliberately a thin layer over tmux. It creates and locates ordinary
+tmux sessions, windows, and panes, so existing bindings, navigation, and session
+management continue to work unchanged.
 
-Tmux handles that scale well, but repeatedly creating, naming, and finding
-everything becomes tedious. I wanted some automation for this denser workflow
-without moving to a specialized agent terminal or replacing the shell tools I
-already use.
+A key binding opens the palette for the current project, listing configured
+tasks, coding agents, and package scripts discovered from the root `package.json`
+and workspace packages. From there, you can launch an entry, focus one that is
+already running, or choose where it should open. A live sidebar lists running
+tasks and agents so you can find and return to them.
+
+I built Muxpad for my own workflow: managing dev servers, workers, databases,
+test watchers, and coding agents across multiple repositories. tmux handles
+these processes well, but in more complex projects, repeatedly creating, naming,
+and finding the corresponding windows and panes becomes tedious. Muxpad
+automates that bookkeeping without replacing tmux or the shell tools I already
+use.
 
 ## Requirements
 
@@ -35,71 +42,122 @@ already use.
 
 ## Setup
 
-1. Copy the example configuration and edit its project roots and tasks:
+1. Copy the example configuration and edit it (see [Configuration](#configuration)):
 
    ```sh
    mkdir -p ~/.config/muxpad
    cp config.example.yml ~/.config/muxpad/config.yml
    ```
 
-   The essential shape is:
-
-   ```yaml
-   projects:
-     sample-app:
-       name: sample-app
-       root: ~/code/sample-app
-       default_tasks: [api]
-       tasks:
-         api:
-           name: api
-           description: Start the API development server
-           command: npm run dev:api
-   ```
-
-2. Put this repository's `bin` directory on `PATH`, or link it into a directory already on `PATH`:
+2. Put this repository's `bin` directory on `PATH`, or link `muxpad` into a
+   directory already on `PATH`:
 
    ```sh
    ln -s "$PWD/bin/muxpad" ~/.local/bin/muxpad
    ```
 
-3. Optionally add one overridable tmux binding:
+3. Add one overridable tmux binding so `prefix + b` opens the palette (change
+   `b` to any free key):
 
    ```tmux
    bind-key b run-shell -b 'muxpad menu'
    ```
 
-   This binds the menu to `prefix + b`. Change `b` to any free key you prefer.
+Then:
+- `muxpad start <project>` creates the project's tmux session and launches its
+default tasks
+- `prefix + b` opens the palette from anywhere inside tmux
+- Run `muxpad help` for the available commands.
 
-Run `muxpad help` for the direct command vocabulary. `MUXPAD_CONFIG` can point
-at another configuration file, which is useful for testing.
+## Configuration
 
-## Package scripts
+Since muxpad can autodiscover your package scripts, configuration is not
+required. However, you can add common tasks and customize Muxpad's behavior with
+a config file.
 
-Muxpad discovers scripts from the root `package.json` and workspace packages.
-They appear as `SCRIPT` entries and never launch automatically. Configured tasks
-remain `TASK` entries and win when their command and working directory exactly
-match a discovered script.
+Muxpad reads a single YAML file at `~/.config/muxpad/config.yml`. You can also set
+`MUXPAD_CONFIG` to point at a different file, which is useful for testing a config
+without changing your real one.
 
-Use `discovery.exclude` under a project to hide noisy entries:
+The config file has two top-level sections: `projects` and `agents`. A complete
+example lives in [`config.example.yml`](config.example.yml).
+
+### Projects
+
+Each entry under `projects` registers a directory Muxpad knows about. The key is
+a stable identifier (letters, numbers, `-`, `_`); `muxpad start <id>` starts it,
+and running `muxpad start` from anywhere inside `root` resolves to it.
 
 ```yaml
-discovery:
-  exclude:
-    - "mobile:translations:*"
+projects:
+  northstar:                  # project identifier
+    name: northstar           # display name (defaults to the identifier)
+    root: ~/code/northstar    # project root directory (required)
+    default_tasks: [api, web] # tasks launched on first start
+    discovery:
+      exclude:
+        - "@northstar/web:e2e" # glob patterns to hide from autodiscovery
+    tasks:
+      api:
+        name: api                            # label shown in the palette
+        description: API dev server          # one-line description (required)
+        command: pnpm --filter api dev       # the command to run (required)
+        directory: apps/api                  # optional, relative to root
+        placement: window                    # optional: window | vertical | horizontal
+        exit_mode: keep                      # optional: close | keep | keep-on-error
 ```
 
-The launch list groups things you can start into sections — configured tasks
-first, then agents, and finally the auto-discovered package scripts — so the
-things you launch most are never buried. Type to fuzzy-search across every
-section at once (name, command, and description); matching items stay grouped
-and empty sections disappear. Anything currently running (agent instances and
-orphaned scripts) lives in a separate sidebar on the left, which appears only
-while something is running; use the left and right arrows to move between the
-sidebar and the launch list. The highlighted entry's full command and the
-directory it runs in show in a detail strip at the bottom. Enter launches (or
-focuses a running instance), Tab opens the placement/action chooser, and Ctrl-R
-restarts a retained task or script.
+Each **task** is a command you run often, such as a dev server, test watcher,
+database tool, or editor.
+
+**Exit modes** decide what a window or pane does when its command finishes:
+- `close`: closes the pane whenever the command exits.
+- `keep`: opens an interactive shell whenever the command exits, keeping the
+  output in scrollback. This is useful for long-running servers because an
+  unexpected exit stays visible.
+- `keep-on-error`: closes on success and opens a shell on failure. This is the
+  default for tasks and discovered scripts.
+
+A finished task that dropped to a shell is still tracked: it shows as `finished`
+in the palette, selecting it focuses the pane without erasing its output, and
+`Ctrl-R` restarts the command in place.
+
+### Agents
+
+Coding agents are built in so you don't need to repeat them in every project.
+They are automatically available in any directory.
+
+The defaults are **Claude Code**, **Codex**, and **OpenCode**, but you can add
+new ones.
+
+Selecting an agent always launches a fresh instance; numbered names (`codex`,
+`codex 2`, …) keep multiple instances apart. Use the `agents` section to
+override or disable one:
+
+```yaml
+agents:
+  claude:
+    enabled: true
+  codex:
+    command: codex --model gpt-5   # custom command; executable is inferred
+  opencode:
+    disabled: true                 # hide it from the palette
+```
+
+### Package-script autodiscovery
+
+For any project (and ad hoc directories), Muxpad scans the root `package.json`
+and every workspace package, detects the package manager, and offers useful
+scripts automatically. Discovered scripts appear labelled `SCRIPT`, separately
+from your configured `TASK` entries, and will **never launch automatically**.
+
+## Palette actions
+
+- **Enter** launches the highlighted entry in a new window, or focuses it if
+  it's already running.
+- **Tab** opens the placement chooser (new window, vertical or horizontal split,
+  restart where applicable).
+- **Ctrl-R** restarts a retained task or script in place.
 
 ## Tests
 
