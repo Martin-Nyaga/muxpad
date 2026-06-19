@@ -3,6 +3,7 @@
 require_relative "muxpad/error"
 require_relative "muxpad/config"
 require_relative "muxpad/discovery"
+require_relative "muxpad/agent_discovery"
 require_relative "muxpad/tmux"
 require_relative "muxpad/palette"
 require_relative "muxpad/application"

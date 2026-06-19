@@ -10,11 +10,13 @@ module Muxpad
     # but the palette routes them into its sidebar rather than this list.
     SECTION_ORDER = ["Tasks", "Agents", "Discovered scripts"].freeze
 
-    def initialize(config: Config.new, tmux: Tmux.new, discovery: Discovery.new, palette: Palette.new,
+    def initialize(config: Config.new, tmux: Tmux.new, discovery: Discovery.new, agent_discovery: AgentDiscovery.new,
+                   palette: Palette.new,
                    input: $stdin, output: $stdout)
       @config = config
       @tmux = tmux
       @discovery = discovery
+      @agent_discovery = agent_discovery
       @palette = palette
       @input = input
       @output = output
@@ -162,6 +164,7 @@ module Muxpad
       panes.select { |pane| pane.kind == "agent" && !pane.done? }.each do |pane|
         items << running_item(pane, "window #{pane.window_index} · #{pane.current_command}")
       end
+      items.concat(discovered_agent_items(panes))
       panes.select { |pane| pane.kind == "script" && !pane.done? && !scripts.key?(pane.definition_id) }.each do |pane|
         items << running_item(pane, "removed package script · window #{pane.window_index}")
       end
@@ -290,6 +293,22 @@ module Muxpad
       generic = [pane.name, pane.definition_id, "Claude Code", "Codex", "New thread"]
       codex_id = pane.definition_id == "codex" && title.match?(/\A(?:thread\s+)?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i)
       title unless title.empty? || codex_id || generic.any? { |value| title.casecmp?(value) }
+    end
+
+    def discovered_agent_items(panes)
+      unmanaged = panes.select { |pane| pane.kind.empty? && !pane.done? && pane.pid.to_i.positive? }
+      detected = @agent_discovery.detect(unmanaged)
+      used_names = panes.filter_map { |pane| pane.name if pane.kind == "agent" }
+      unmanaged.filter_map do |pane|
+        provider = detected[pane.id]
+        next unless provider
+        instance = 1
+        instance += 1 while used_names.include?(agent_instance_name(provider, instance))
+        name = agent_instance_name(provider, instance)
+        used_names << name
+        adopted = pane.with(kind: "agent", definition_id: provider, name:)
+        running_item(adopted, "external agent · window #{pane.window_index}")
+      end
     end
 
     def confirm_switch(session)

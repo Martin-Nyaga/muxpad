@@ -136,7 +136,9 @@ override or disable one:
 
 When Claude Code or Codex publishes a thread title to the terminal, Muxpad shows
 it beneath the running instance in the sidebar. Missing titles are simply
-omitted.
+omitted. Interactive Claude Code and Codex processes launched directly in a
+tmux pane are detected when the palette opens, even when Muxpad did not launch
+them.
 
 ```yaml
 agents:

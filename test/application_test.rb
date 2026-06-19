@@ -36,6 +36,14 @@ class ApplicationTest < MuxpadTest
     end
   end
 
+  class StaticAgentDiscovery
+    def initialize(detected)
+      @detected = detected
+    end
+
+    def detect(_panes) = @detected
+  end
+
   def test_declining_inside_tmux_switch_does_not_create_or_change_target
     project = File.join(@tmp, "project")
     FileUtils.mkdir_p(project)
@@ -100,7 +108,8 @@ class ApplicationTest < MuxpadTest
     app = Muxpad::Application.new
     pane = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
                             kind: "agent", definition_id: "codex", name: "codex", dead: false,
-                            finished: false, current_command: "codex", title: "  Fix   flaky tests  ")
+                            finished: false, current_command: "codex", title: "  Fix   flaky tests  ",
+                            pid: "100", current_path: "/work")
 
     assert_equal "Fix flaky tests", app.send(:agent_summary, pane)
     assert_nil app.send(:agent_summary, pane.with(title: "Codex"))
@@ -115,7 +124,8 @@ class ApplicationTest < MuxpadTest
     FileUtils.mkdir_p(project)
     pane = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
                             kind: "task", definition_id: "server", name: "Server", dead: false,
-                            finished: false, current_command: "sleep", title: "Server")
+                            finished: false, current_command: "sleep", title: "Server", pid: "100",
+                            current_path: project)
     tmux = InsideTmux.new(panes: [pane], project_context: "work")
     app = Muxpad::Application.new(config: config_for(project), tmux:)
 
@@ -126,6 +136,25 @@ class ApplicationTest < MuxpadTest
     assert_equal ["Tasks", "running", :running], [launch.section, launch.state, launch.state_kind]
     assert_equal ["Running", "Server", "window 1 · sleep"],
                  [running.section, running.name, running.description]
+  end
+
+  def test_unmanaged_detected_agent_appears_as_a_numbered_running_instance
+    managed = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
+                               kind: "agent", definition_id: "codex", name: "codex", dead: false,
+                               finished: false, current_command: "node", title: "Codex", pid: "100",
+                               current_path: "/work")
+    unmanaged = Muxpad::Pane.new(id: "%2", session: "work", window: "@2", window_index: "2",
+                                 kind: "", definition_id: "", name: "", dead: false, finished: false,
+                                 current_command: "node", title: "Investigate timeout", pid: "200",
+                                 current_path: "/work")
+    tmux = InsideTmux.new(panes: [managed, unmanaged])
+    discovery = StaticAgentDiscovery.new("%2" => "codex")
+    app = Muxpad::Application.new(tmux:, agent_discovery: discovery)
+
+    item = app.send(:palette_items, "work").find { |candidate| candidate.token == "running:%2" }
+
+    assert_equal ["Running", "codex 2", "external agent · window 2", "Investigate timeout"],
+                 [item.section, item.name, item.description, item.summary]
   end
 
   private
