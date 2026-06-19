@@ -7,8 +7,10 @@ class ApplicationTest < MuxpadTest
   class InsideTmux
     attr_reader :calls
 
-    def initialize(existing: false)
+    def initialize(existing: false, panes: [], project_context: "")
       @existing = existing
+      @panes = panes
+      @project_context = project_context
       @calls = []
     end
 
@@ -16,8 +18,8 @@ class ApplicationTest < MuxpadTest
     def current_session = "original"
     def current_pane = "%9"
     def session_exists?(name) = @existing
-    def panes(_session) = []
-    def project_context(_session) = ""
+    def panes(_session) = @panes
+    def project_context(_session) = @project_context
     def session_root(_session) = "/ordinary"
 
     def create_session(*args, **kwargs)
@@ -76,6 +78,53 @@ class ApplicationTest < MuxpadTest
     assert_equal "original", launch[:session]
     assert_equal "%9", launch[:target]
     assert_equal "horizontal", launch[:placement]
+  end
+
+  def test_codex_launch_requests_the_thread_terminal_title
+    config = Muxpad::Config.new(write_config(<<~YAML))
+      agents:
+        codex:
+          command: codex --model test-model
+          executable: sleep
+    YAML
+    tmux = InsideTmux.new(existing: true)
+    app = Muxpad::Application.new(config:, tmux:)
+
+    app.agent("codex", attach: false)
+
+    command = tmux.calls.fetch(0).fetch(1).fetch(:definition).command
+    assert_match(/\Acodex -c .*terminal_title.*thread.* --model test-model\z/, command)
+  end
+
+  def test_agent_summary_uses_only_meaningful_claude_and_codex_titles
+    app = Muxpad::Application.new
+    pane = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
+                            kind: "agent", definition_id: "codex", name: "codex", dead: false,
+                            finished: false, current_command: "codex", title: "  Fix   flaky tests  ")
+
+    assert_equal "Fix flaky tests", app.send(:agent_summary, pane)
+    assert_nil app.send(:agent_summary, pane.with(title: "Codex"))
+    assert_nil app.send(:agent_summary, pane.with(definition_id: "opencode", title: "Useful title"))
+    assert_equal "* Refactor authentication", app.send(:agent_summary,
+      pane.with(definition_id: "claude", name: "claude", title: "✳ Refactor authentication"))
+  end
+
+  def test_running_task_appears_in_sidebar_and_remains_in_launch_list
+    project = File.join(@tmp, "project")
+    FileUtils.mkdir_p(project)
+    pane = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
+                            kind: "task", definition_id: "server", name: "Server", dead: false,
+                            finished: false, current_command: "sleep", title: "Server")
+    tmux = InsideTmux.new(panes: [pane], project_context: "work")
+    app = Muxpad::Application.new(config: config_for(project), tmux:)
+
+    items = app.send(:palette_items, "work")
+
+    launch = items.find { |item| item.token == "task:server" }
+    running = items.find { |item| item.token == "running:%1" }
+    assert_equal ["Tasks", "running", :running], [launch.section, launch.state, launch.state_kind]
+    assert_equal ["Running", "Server", "window 1 · sleep"],
+                 [running.section, running.name, running.description]
   end
 
   private

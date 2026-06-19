@@ -4,14 +4,14 @@ require "open3"
 require "shellwords"
 
 module Muxpad
-  Pane = Data.define(:id, :session, :window, :window_index, :kind, :definition_id, :name, :dead, :finished, :current_command) do
+  Pane = Data.define(:id, :session, :window, :window_index, :kind, :definition_id, :name, :dead, :finished, :current_command, :title) do
     # A managed command has run to completion when its pane is a dropped-to
     # shell (finished) or a retained corpse (dead).
     def done? = dead || finished
   end
 
   class Tmux
-    FORMAT = ['#{pane_id}', '#{session_name}', '#{window_id}', '#{window_index}', '#{@muxpad_kind}', '#{@muxpad_id}', '#{@muxpad_name}', '#{pane_dead}', '#{@muxpad_finished}', '#{pane_current_command}'].join("\t")
+    FORMAT = ['#{pane_id}', '#{session_name}', '#{window_id}', '#{window_index}', '#{@muxpad_kind}', '#{@muxpad_id}', '#{@muxpad_name}', '#{pane_dead}', '#{@muxpad_finished}', '#{pane_current_command}', '#{pane_title}'].join("\t")
 
     def initialize
       @prefix = [ENV.fetch("MUXPAD_TMUX", "tmux")]
@@ -71,8 +71,8 @@ module Muxpad
       output = capture("list-panes", "-s", "-t", session, "-F", FORMAT)
       output.lines(chomp: true).filter_map do |line|
         fields = line.split("\t", -1)
-        next if fields.length < 10
-        Pane.new(id: fields[0], session: fields[1], window: fields[2], window_index: fields[3], kind: fields[4], definition_id: fields[5], name: fields[6], dead: fields[7] == "1", finished: fields[8] == "1", current_command: fields[9])
+        next if fields.length < 11
+        Pane.new(id: fields[0], session: fields[1], window: fields[2], window_index: fields[3], kind: fields[4], definition_id: fields[5], name: fields[6], dead: fields[7] == "1", finished: fields[8] == "1", current_command: fields[9], title: fields[10])
       end
     end
 
@@ -130,7 +130,7 @@ module Muxpad
 
     def popup_menu(program)
       command = "MUXPAD_POPUP=1 #{Shellwords.escape(program)} menu"
-      run! "display-popup", "-E", "-w", "88", "-h", "22", "-T", " Muxpad ", command
+      run! "display-popup", "-E", "-w", "96", "-h", "22", "-T", " Muxpad ", command
     end
 
     def kill_session(session)

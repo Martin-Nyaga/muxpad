@@ -134,6 +134,10 @@ Selecting an agent always launches a fresh instance; numbered names (`codex`,
 `codex 2`, …) keep multiple instances apart. Use the `agents` section to
 override or disable one:
 
+When Claude Code or Codex publishes a thread title to the terminal, Muxpad shows
+it beneath the running instance in the sidebar. Missing titles are simply
+omitted.
+
 ```yaml
 agents:
   claude:

@@ -6,7 +6,7 @@ module Muxpad
   # An interactive item shown in the palette. +state+ is the human label and
   # +state_kind+ drives its colour (:running, :idle, :finished, :available,
   # :disabled, :unavailable).
-  Item = Data.define(:token, :section, :name, :description, :command, :directory, :state, :state_kind)
+  Item = Data.define(:token, :section, :name, :description, :command, :directory, :state, :state_kind, :summary)
 
   # A terminal-native command palette: sectioned, fuzzy-searchable, scrollable.
   # The view layer only renders and reads keys; all launch behaviour lives in
@@ -22,6 +22,7 @@ module Muxpad
     NAME_MAX = 24
     RUNNING_SECTION = "Running" # split into the left sidebar rather than the launch list
     SIDEBAR_WIDTH = 20
+    SUMMARY_SIDEBAR_WIDTH = 30
 
     RESET = "\e[0m"
     BOLD = "\e[1m"
@@ -247,11 +248,12 @@ module Muxpad
       launch = launch_lines(width)
       return launch unless sidebar?
 
-      launch = launch_lines(width - SIDEBAR_WIDTH - 1)
-      side = sidebar_lines(SIDEBAR_WIDTH)
+      side_width = @running.any? { |item| !item.summary.to_s.empty? } ? SUMMARY_SIDEBAR_WIDTH : SIDEBAR_WIDTH
+      launch = launch_lines(width - side_width - 1)
+      side = sidebar_lines(side_width)
       height = [[launch.length, side.length].max, list_height].min
       (0...height).map do |i|
-        "#{side[i] || (" " * SIDEBAR_WIDTH)}#{DIM}│#{RESET}#{launch[i]}"
+        "#{side[i] || (" " * side_width)}#{DIM}│#{RESET}#{launch[i]}"
       end
     end
 
@@ -287,8 +289,8 @@ module Muxpad
       end
     end
 
-    # The left sidebar: a Running header followed by each live instance, each as
-    # a coloured dot and name, padded to the fixed sidebar width.
+    # The left sidebar: a Running header followed by each live instance. Agents
+    # may add a second, dimmed line sourced from their terminal title.
     def sidebar_lines(width)
       cells = [fill(" #{HEADER}Running#{RESET}", 8, width)]
       @running.each_with_index do |item, i|
@@ -297,6 +299,14 @@ module Muxpad
           cells << "#{REVERSE}#{" ● #{name}"[0, width].ljust(width)}#{RESET}"
         else
           cells << fill(" #{STATE_COLOR[:running]}●#{RESET} #{name}", 3 + name.length, width)
+        end
+        next if item.summary.to_s.empty?
+        summary = truncate(item.summary.to_s, width - 4)
+        line = "   #{summary}"[0, width].ljust(width)
+        cells << if @focus == :running && i == @run_cursor
+          "#{REVERSE}#{line}#{RESET}"
+        else
+          "#{DIM}#{line}#{RESET}"
         end
       end
       cells

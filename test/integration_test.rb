@@ -253,6 +253,11 @@ class IntegrationTest < MuxpadTest
     assert_match(/window \d+/, running.description)
     refute_includes running.description, "window @"
     assert_equal "running", running.state
+    assert_nil running.summary
+
+    system("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "select-pane", "-t", running.token.delete_prefix("running:"), "-T", "Investigate login timeout")
+    titled = @app.send(:palette_items, "first").find { |item| item.token == running.token }
+    assert_equal "Investigate login timeout", titled.summary
 
     assert_equal 2, pane_ids("first").length
     assert_equal 1, windows("first").length

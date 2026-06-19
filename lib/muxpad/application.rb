@@ -129,7 +129,7 @@ module Muxpad
       instance += 1 while used_names.include?(agent_instance_name(definition.name, instance))
       name = agent_instance_name(definition.name, instance)
       root = tmux.session_root(session)
-      tmux.launch(session:, definition:, kind: "agent", name:, root:, placement: placement || definition.placement,
+      tmux.launch(session:, definition: agent_launch_definition(definition), kind: "agent", name:, root:, placement: placement || definition.placement,
                   target: launch_target(session))
     end
 
@@ -154,6 +154,7 @@ module Muxpad
       project&.tasks&.each_value do |task|
         pane = panes.find { |item| item.kind == "task" && item.definition_id == task.id }
         items << launchable_item("task:#{task.id}", "Tasks", task, pane, root)
+        items << running_item(pane, "window #{pane.window_index} · #{pane.current_command}") if pane && !pane.done?
       end
       config.agents.each_value do |agent|
         items << agent_item(agent, root)
@@ -178,7 +179,7 @@ module Muxpad
       end
       Item.new(token:, section:, name: definition.name, description: definition.description,
                command: definition.command, directory: resolve_directory(definition, root),
-               state:, state_kind: kind)
+               state:, state_kind: kind, summary: nil)
     end
 
     def agent_item(agent, root)
@@ -189,13 +190,13 @@ module Muxpad
       end
       Item.new(token: "agent:#{agent.id}", section: "Agents", name: agent.name,
                description: agent.description, command: agent.command, directory: root,
-               state:, state_kind: kind)
+               state:, state_kind: kind, summary: nil)
     end
 
     def running_item(pane, description)
       Item.new(token: "running:#{pane.id}", section: "Running", name: pane.name,
                description:, command: pane.current_command, directory: nil,
-               state: "running", state_kind: :running)
+               state: "running", state_kind: :running, summary: agent_summary(pane))
     end
 
     def resolve_directory(definition, root)
@@ -271,6 +272,23 @@ module Muxpad
 
     def agent_instance_name(name, instance)
       instance == 1 ? name : "#{name} #{instance}"
+    end
+
+    def agent_launch_definition(definition)
+      return definition unless definition.id == "codex"
+      command = definition.command.sub(/\A(\s*(?:[^\s]*\/)?codex)(?=\s|\z)/) do |executable|
+        config = Shellwords.escape('tui.terminal_title=["thread"]')
+        "#{executable} -c #{config}"
+      end
+      Definition.new(**definition.to_h.merge(command:))
+    end
+
+    def agent_summary(pane)
+      return unless %w[claude codex].include?(pane.definition_id)
+      title = pane.title.to_s.gsub(/\s+/, " ").strip
+      title = title.sub(/\A✳(?=\s|\z)/, "*") if pane.definition_id == "claude"
+      generic = [pane.name, pane.definition_id, "Claude Code", "Codex", "New thread"]
+      title unless title.empty? || generic.any? { |value| title.casecmp?(value) }
     end
 
     def confirm_switch(session)
