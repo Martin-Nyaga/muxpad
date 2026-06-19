@@ -288,7 +288,8 @@ module Muxpad
       title = pane.title.to_s.gsub(/\s+/, " ").strip
       title = title.sub(/\A✳(?=\s|\z)/, "*") if pane.definition_id == "claude"
       generic = [pane.name, pane.definition_id, "Claude Code", "Codex", "New thread"]
-      title unless title.empty? || generic.any? { |value| title.casecmp?(value) }
+      codex_id = pane.definition_id == "codex" && title.match?(/\A(?:thread\s+)?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i)
+      title unless title.empty? || codex_id || generic.any? { |value| title.casecmp?(value) }
     end
 
     def confirm_switch(session)

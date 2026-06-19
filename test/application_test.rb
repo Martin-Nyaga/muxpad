@@ -104,6 +104,7 @@ class ApplicationTest < MuxpadTest
 
     assert_equal "Fix flaky tests", app.send(:agent_summary, pane)
     assert_nil app.send(:agent_summary, pane.with(title: "Codex"))
+    assert_nil app.send(:agent_summary, pane.with(title: "019edd47-91f2-7102-b113-d047160a33d8"))
     assert_nil app.send(:agent_summary, pane.with(definition_id: "opencode", title: "Useful title"))
     assert_equal "* Refactor authentication", app.send(:agent_summary,
       pane.with(definition_id: "claude", name: "claude", title: "✳ Refactor authentication"))
