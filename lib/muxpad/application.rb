@@ -156,7 +156,7 @@ module Muxpad
       project&.tasks&.each_value do |task|
         pane = panes.find { |item| item.kind == "task" && item.definition_id == task.id }
         items << launchable_item("task:#{task.id}", "Tasks", task, pane, root)
-        items << running_item(pane, "window #{pane.window_index} · #{pane.current_command}") if pane && !pane.done?
+        items << instance_item("task:#{task.id}", task, pane) if pane
       end
       config.agents.each_value do |agent|
         items << agent_item(agent, root)
@@ -171,8 +171,21 @@ module Muxpad
       scripts.each_value do |script|
         pane = panes.find { |item| item.kind == "script" && item.definition_id == script.id }
         items << launchable_item("script:#{script.id}", "Discovered scripts", script, pane, root)
+        items << instance_item("script:#{script.id}", script, pane) if pane
       end
       items
+    end
+
+    # A left-sidebar entry for a live or finished pane. Live panes carry a
+    # +running:+ token so Enter focuses them by pane id; finished tasks/scripts
+    # stay pinned in the sidebar (yellow) under their launch token so Enter
+    # focuses the dropped shell and Ctrl-R restarts the command in place —
+    # without hunting for them back in the launcher.
+    def instance_item(token, definition, pane)
+      return running_item(pane, "window #{pane.window_index} · #{pane.current_command}") unless pane.done?
+      Item.new(token:, section: "Running", name: pane.name, description: definition.description,
+               command: definition.command, directory: nil,
+               state: "finished", state_kind: :finished, summary: agent_summary(pane))
     end
 
     def launchable_item(token, section, definition, pane, root)

@@ -138,6 +138,24 @@ class ApplicationTest < MuxpadTest
                  [running.section, running.name, running.description]
   end
 
+  def test_finished_task_stays_pinned_in_the_sidebar_under_its_restart_token
+    project = File.join(@tmp, "project")
+    FileUtils.mkdir_p(project)
+    pane = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
+                            kind: "task", definition_id: "server", name: "Server", dead: false,
+                            finished: true, current_command: "zsh", title: "Server", pid: "100",
+                            current_path: project)
+    tmux = InsideTmux.new(panes: [pane], project_context: "work")
+    app = Muxpad::Application.new(config: config_for(project), tmux:)
+
+    items = app.send(:palette_items, "work")
+
+    sidebar = items.find { |item| item.section == "Running" }
+    assert_equal ["task:server", "Server", :finished], [sidebar.token, sidebar.name, sidebar.state_kind]
+    # The launch list keeps its own finished row too.
+    assert(items.any? { |item| item.section == "Tasks" && item.token == "task:server" && item.state_kind == :finished })
+  end
+
   def test_unmanaged_detected_agent_appears_as_a_numbered_running_instance
     managed = Muxpad::Pane.new(id: "%1", session: "work", window: "@1", window_index: "1",
                                kind: "agent", definition_id: "codex", name: "codex", dead: false,

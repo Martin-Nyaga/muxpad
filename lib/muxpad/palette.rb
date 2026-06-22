@@ -226,14 +226,19 @@ module Muxpad
       item && %i[running finished].include?(item.state_kind) ? "Focus" : "Run"
     end
 
-    # Restart only makes sense for a finished task/script with a pane to respawn.
+    # Restart only makes sense for a finished task/script with a pane to respawn,
+    # whether it is selected in the launch list or pinned in the sidebar.
     def restartable?
-      @focus == :launch && current&.state_kind == :finished
+      current&.state_kind == :finished
     end
 
     def hint
       switch = sidebar? ? "←/→ switch · " : ""
-      return "#{switch}enter focus · esc close" if @focus == :running
+      if @focus == :running
+        actions = ["enter focus"]
+        actions << "ctrl-r restart" if restartable?
+        return "#{switch}#{actions.join(" · ")} · esc close"
+      end
       actions = ["enter #{verb.downcase}", "tab actions"]
       actions << "ctrl-r restart" if restartable?
       "#{switch}#{actions.join(" · ")} · esc close"
@@ -289,7 +294,8 @@ module Muxpad
       end
     end
 
-    # The left sidebar: a Running header followed by each live instance. Agents
+    # The left sidebar: a Running header followed by each instance, coloured by
+    # state so finished tasks stay pinned here (yellow) ready to restart. Agents
     # may add a second, dimmed line sourced from their terminal title.
     def sidebar_lines(width)
       cells = [fill(" #{HEADER}Running#{RESET}", 8, width)]
@@ -298,7 +304,8 @@ module Muxpad
         if @focus == :running && i == @run_cursor
           cells << "#{REVERSE}#{" ● #{name}"[0, width].ljust(width)}#{RESET}"
         else
-          cells << fill(" #{STATE_COLOR[:running]}●#{RESET} #{name}", 3 + name.length, width)
+          color = STATE_COLOR.fetch(item.state_kind, STATE_COLOR[:running])
+          cells << fill(" #{color}●#{RESET} #{name}", 3 + name.length, width)
         end
         next if item.summary.to_s.empty?
         summary = truncate(item.summary.to_s, width - 4)
