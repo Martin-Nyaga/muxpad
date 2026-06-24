@@ -75,11 +75,13 @@ func (c *Client) Inside() bool {
 }
 
 func (c *Client) CurrentSession() (string, error) {
-	return c.capture("display-message", "-p", "#{session_name}")
+	out, err := c.capture("display-message", "-p", "#{session_name}")
+	return strings.TrimSpace(out), err
 }
 
 func (c *Client) CurrentPane() (string, error) {
-	return c.capture("display-message", "-p", "#{pane_id}")
+	out, err := c.capture("display-message", "-p", "#{pane_id}")
+	return strings.TrimSpace(out), err
 }
 
 func (c *Client) SessionExists(name string) bool {
