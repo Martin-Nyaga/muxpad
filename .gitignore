@@ -1,2 +1,6 @@
 # Machine-local reports, configurations, and scratch artifacts.
 .local/
+
+# Local Go builds.
+/dist/
+/muxpad
