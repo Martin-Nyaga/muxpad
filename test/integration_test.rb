@@ -170,11 +170,28 @@ class IntegrationTest < MuxpadTest
     refute kept.dead
 
     definition = @app.config.project("first").tasks.fetch("failure")
-    assert_includes captured_pane(failure.id), "[Muxpad] Command failed with status 7"
-    assert_includes captured_pane(kept.id), "[Muxpad] Command exited with status 0"
     @tmux.restart(failure, definition)
     sleep 0.2
     assert managed("first", "task", "failure").first.finished
+  end
+
+  def test_finished_task_seeds_its_command_into_the_dropped_shell_history
+    home = File.join(@tmp, "home")
+    FileUtils.mkdir_p(home)
+    original = ENV.values_at("HOME", "SHELL")
+    ENV["HOME"] = home
+    ENV["SHELL"] = "/bin/bash"
+
+    @app.start(project_id: "first", empty: true, attach: false)
+    Dir.chdir(@project) { @app.task("kept", attach: false) } # exit 0, exit_mode: keep
+    sleep 0.5
+
+    assert managed("first", "task", "kept").first.finished
+    history = File.join(home, ".bash_history")
+    assert File.exist?(history), "dropped shell history should be seeded"
+    assert_includes File.read(history), "exit 0"
+  ensure
+    ENV["HOME"], ENV["SHELL"] = original
   end
 
   def test_interrupting_a_keep_command_drops_to_a_shell_instead_of_closing_the_pane
@@ -190,7 +207,6 @@ class IntegrationTest < MuxpadTest
     survivor = managed("first", "task", "api").first
     refute_nil survivor, "interrupting a keep command must not close the pane"
     assert survivor.finished
-    assert_includes captured_pane(survivor.id), "[Muxpad] Command failed with status 130"
   end
 
   def test_ad_hoc_session_has_no_project_tasks
@@ -362,11 +378,6 @@ class IntegrationTest < MuxpadTest
   def window_indexes(session)
     stdout, = Open3.capture2("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "list-windows", "-t", session, "-F", '#{window_index}')
     stdout.lines.map(&:to_i)
-  end
-
-  def captured_pane(pane)
-    stdout, = Open3.capture2("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "capture-pane", "-p", "-S", "-", "-t", pane)
-    stdout
   end
 
   def pane_ids(session)

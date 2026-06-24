@@ -144,13 +144,23 @@ module Muxpad
       tmux = @prefix.map { |part| Shellwords.escape(part) }.join(" ")
       # muxpad_drop marks the pane finished and hands it back to an interactive
       # shell so the output stays scrollable and the user can keep working in
-      # place. Trapping INT/TERM means an interrupted command still reverts to a
-      # shell instead of killing the pane (and the session, if it is the last).
+      # place. Before handing over it seeds the command into the shell's history
+      # file, so "up arrow, enter" reruns the task in place and muscle memory
+      # keeps working. Trapping INT/TERM means an interrupted command still
+      # reverts to a shell instead of killing the pane (and the session, if it
+      # is the last). The shell's own prompt signals the drop, so muxpad stays
+      # quiet rather than printing a banner.
       drop = <<~SH.chomp
+        muxpad_seed_history() {
+          [ -n "$muxpad_command" ] || return 0
+          case "${SHELL##*/}" in
+            zsh) printf ': %s:0;%s\\n' "$(date +%s 2>/dev/null || echo 0)" "$muxpad_command" >> "${HISTFILE:-$HOME/.zsh_history}" 2>/dev/null ;;
+            bash) printf '%s\\n' "$muxpad_command" >> "${HISTFILE:-$HOME/.bash_history}" 2>/dev/null ;;
+          esac
+        }
         muxpad_drop() {
-          if [ "${status:-1}" -eq 0 ]; then label=exited; else label=failed; fi
-          printf '\\n[Muxpad] Command %s with status %s. Dropped to a shell; scroll output with prefix + [.\\n' "$label" "$status" >&2
           #{tmux} set-option -p -t "$TMUX_PANE" @muxpad_finished 1
+          muxpad_seed_history
           exec "${SHELL:-/bin/sh}"
         }
         trap 'status=$?; muxpad_drop' INT TERM
@@ -161,7 +171,7 @@ module Muxpad
       when "keep"
         "muxpad_drop"
       end
-      inner = "#{drop}\n( #{command}\n); status=$?\n#{tail}"
+      inner = "muxpad_command=#{Shellwords.escape(command)}\n#{drop}\n( #{command}\n); status=$?\n#{tail}"
       "sh -c #{Shellwords.escape(inner)}"
     end
 
