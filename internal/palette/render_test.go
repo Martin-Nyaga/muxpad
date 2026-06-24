@@ -30,6 +30,50 @@ func TestSidebarKeepsSingleLineItemWhenSummaryIsMissing(t *testing.T) {
 	}
 }
 
+func TestRenderIncludesSearchPreviewHintAndPrompt(t *testing.T) {
+	item := Item{
+		Token:       "task:server",
+		Section:     "Tasks",
+		Name:        "Server",
+		Description: "Run server",
+		Command:     "npm run dev",
+		Directory:   "/tmp/work",
+		State:       "not running",
+		StateKind:   StateIdle,
+	}
+	model := newModel([]Item{item}, nil, []string{"Tasks"})
+	model.query = "srv"
+	lines := strings.Join(model.Render(80, 24, "Muxpad"), "\n")
+	for _, want := range []string{"Muxpad", "srv", "This will run:", "$ npm run dev", "in /tmp/work", "enter run", "tab actions"} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("rendered palette missing %q:\n%s", want, lines)
+		}
+	}
+}
+
+func TestLaunchListScrollsToCursorWithinViewport(t *testing.T) {
+	var items []Item
+	for i := 0; i < 12; i++ {
+		items = append(items, Item{
+			Token:       "task:item",
+			Section:     "Tasks",
+			Name:        "Item" + string(rune('A'+i)),
+			Description: "Run item",
+			Command:     "true",
+			State:       "not running",
+			StateKind:   StateIdle,
+		})
+	}
+	model := newModel(items, nil, []string{"Tasks"})
+	for i := 0; i < 9; i++ {
+		model.move(1)
+	}
+	lines := strings.Join(model.BodyLines(80, 5), "\n")
+	if strings.Contains(lines, "ItemA") || !strings.Contains(lines, "ItemJ") {
+		t.Fatalf("viewport did not scroll to selected item:\n%s", lines)
+	}
+}
+
 func runningItem(summary string) Item {
 	return Item{
 		Token:       "running:%1",

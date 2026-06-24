@@ -83,6 +83,19 @@ agents:
 	}
 }
 
+func TestAgentDisabledAcceptsYamlTruthyValues(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := loadConfig(t, tmp, `
+agents:
+  claude:
+    disabled: yes
+`)
+	claude, _ := cfg.Agent("claude")
+	if claude.Enabled {
+		t.Fatal("claude should be disabled")
+	}
+}
+
 func TestLoadsProjectDiscoveryExclusions(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := loadConfig(t, tmp, `

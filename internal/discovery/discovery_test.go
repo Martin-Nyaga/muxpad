@@ -74,6 +74,18 @@ func TestInvalidOrMissingPackageFilesProduceNoScripts(t *testing.T) {
 	}
 }
 
+func TestExcludePatternsMatchRubyFnmatchSemantics(t *testing.T) {
+	if !excluded("@northstar/web:e2e", []string{"*:e2e"}) {
+		t.Fatal("star should match scoped package names containing slash")
+	}
+	if !excluded("mobile:translations:check", []string{"{mobile,web}:translations:*"}) {
+		t.Fatal("brace alternatives should match")
+	}
+	if excluded("api:test", []string{"{mobile,web}:translations:*"}) {
+		t.Fatal("unmatched pattern should not exclude")
+	}
+}
+
 func writeJSON(t *testing.T, path string, value any) {
 	t.Helper()
 	data, err := json.Marshal(value)

@@ -397,7 +397,12 @@ func boolValue(node *yaml.Node) bool {
 	if node == nil {
 		return false
 	}
-	return strings.EqualFold(node.Value, "true")
+	switch strings.ToLower(node.Value) {
+	case "true", "yes", "on", "1":
+		return true
+	default:
+		return false
+	}
 }
 
 func definitionNode(base Definition, override *yaml.Node) *yaml.Node {
@@ -497,6 +502,9 @@ func canonicalPath(path string) string {
 	if resolved, err := filepath.EvalSymlinks(expanded); err == nil {
 		return resolved
 	}
+	// tmux reports macOS temp paths through their real /private/var prefix.
+	// Resolve the deepest existing ancestor so configured roots and pane paths
+	// still compare equal when the final path segment does not exist yet.
 	var suffix []string
 	current := expanded
 	for {

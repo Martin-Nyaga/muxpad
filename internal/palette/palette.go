@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"golang.org/x/term"
@@ -44,6 +45,9 @@ type Option struct {
 }
 
 const (
+	Chrome              = 10
+	MinList             = 3
+	RightPad            = 2
 	Reset               = "\033[0m"
 	Bold                = "\033[1m"
 	Dim                 = "\033[2m"
@@ -88,8 +92,9 @@ func (p *Palette) Select(items []Item, sectionOrder []string) (Selection, bool, 
 	running, launch := splitRunning(items)
 	model := newModel(launch, running, sectionOrder)
 	render := func() {
+		columns, rows := terminalSize(p.Output)
 		fmt.Fprint(p.Output, "\033[?25l\033[H")
-		for _, line := range model.BodyLines(width(p.Output)) {
+		for _, line := range model.Render(columns-RightPad, rows, p.Prompt) {
 			fmt.Fprintf(p.Output, "%s\033[K\r\n", line)
 		}
 		fmt.Fprint(p.Output, "\033[J")
@@ -183,6 +188,7 @@ type model struct {
 	rows         []row
 	selectable   []int
 	nameWidth    int
+	offset       int
 }
 
 type row struct {
@@ -211,7 +217,8 @@ func (m *model) handle(key string) (Selection, bool, bool) {
 		m.focusRunning = false
 	case "backspace":
 		if m.query != "" {
-			m.query = m.query[:len(m.query)-1]
+			runes := []rune(m.query)
+			m.query = string(runes[:len(runes)-1])
 			m.focusRunning = false
 			m.refilter()
 		}
@@ -246,10 +253,15 @@ func (m *model) handle(key string) (Selection, bool, bool) {
 }
 
 func (m *model) refilter() {
-	grouped := map[string][]Item{}
-	for _, item := range m.launch {
-		if Score(item, m.query) >= 0 {
-			grouped[item.Section] = append(grouped[item.Section], item)
+	type rankedItem struct {
+		item  Item
+		score int
+		index int
+	}
+	grouped := map[string][]rankedItem{}
+	for index, item := range m.launch {
+		if score := Score(item, m.query); score >= 0 {
+			grouped[item.Section] = append(grouped[item.Section], rankedItem{item: item, score: score, index: index})
 		}
 	}
 	m.rows = nil
@@ -258,12 +270,18 @@ func (m *model) refilter() {
 		if len(items) == 0 {
 			continue
 		}
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].score == items[j].score {
+				return items[i].index < items[j].index
+			}
+			return items[i].score > items[j].score
+		})
 		if len(m.rows) > 0 {
 			m.rows = append(m.rows, row{kind: "blank"})
 		}
 		m.rows = append(m.rows, row{kind: "header", label: section})
 		for _, item := range items {
-			m.rows = append(m.rows, row{kind: "item", item: item})
+			m.rows = append(m.rows, row{kind: "item", item: item.item})
 		}
 	}
 	m.selectable = nil
@@ -273,6 +291,7 @@ func (m *model) refilter() {
 		}
 	}
 	m.cursor = 0
+	m.offset = 0
 }
 
 func (m *model) current() (Item, bool) {
@@ -296,11 +315,30 @@ func (m *model) move(delta int) {
 	m.cursor = clamp(m.cursor+delta, 0, len(m.selectable)-1)
 }
 
-func (m *model) BodyLines(totalWidth int) []string {
+func (m *model) Render(totalWidth, totalRows int, prompt string) []string {
 	if totalWidth <= 0 {
 		totalWidth = 80
 	}
-	launch := m.launchLines(totalWidth)
+	listHeight := max(totalRows-Chrome, MinList)
+	top := []string{Bold + "  " + prompt + Reset, "", "  " + Bold + "❯" + Reset + " " + m.query, ""}
+	body := m.BodyLines(totalWidth, listHeight)
+	footer := append([]string{""}, m.detailLines(totalWidth)...)
+	footer = append(footer, "  "+Dim+strings.Repeat("─", max(totalWidth-2, 0))+Reset, "  "+Dim+m.hint()+Reset)
+	pad := max(totalRows-len(top)-len(body)-len(footer), 0)
+	lines := append([]string{}, top...)
+	lines = append(lines, body...)
+	for range pad {
+		lines = append(lines, "")
+	}
+	lines = append(lines, footer...)
+	return lines
+}
+
+func (m *model) BodyLines(totalWidth, listHeight int) []string {
+	if totalWidth <= 0 {
+		totalWidth = 80
+	}
+	launch := m.launchLines(totalWidth, listHeight)
 	if len(m.running) == 0 {
 		return launch
 	}
@@ -311,9 +349,9 @@ func (m *model) BodyLines(totalWidth int) []string {
 			break
 		}
 	}
-	launch = m.launchLines(totalWidth - sideWidth - 1)
+	launch = m.launchLines(totalWidth-sideWidth-1, listHeight)
 	side := SidebarLines(m.running, sideWidth, m.focusRunning, m.runCursor)
-	height := max(len(launch), len(side))
+	height := min(max(len(launch), len(side)), listHeight)
 	out := make([]string, 0, height)
 	for i := 0; i < height; i++ {
 		left := strings.Repeat(" ", sideWidth)
@@ -329,9 +367,11 @@ func (m *model) BodyLines(totalWidth int) []string {
 	return out
 }
 
-func (m *model) launchLines(width int) []string {
-	out := make([]string, 0, len(m.rows))
-	for _, row := range m.rows {
+func (m *model) launchLines(width, height int) []string {
+	m.clampOffset(height)
+	last := min(m.offset+height, len(m.rows))
+	out := make([]string, 0, last-m.offset)
+	for _, row := range m.rows[m.offset:last] {
 		switch row.kind {
 		case "blank":
 			out = append(out, "")
@@ -346,6 +386,64 @@ func (m *model) launchLines(width int) []string {
 		}
 	}
 	return out
+}
+
+func (m *model) clampOffset(height int) {
+	if len(m.selectable) == 0 {
+		m.offset = 0
+		return
+	}
+	line := m.selectable[m.cursor]
+	if line < m.offset {
+		m.offset = line
+	}
+	if line > m.offset+height-1 {
+		m.offset = line - height + 1
+	}
+	m.offset = clamp(m.offset, 0, max(len(m.rows)-1, 0))
+}
+
+func (m *model) detailLines(width int) []string {
+	item, ok := m.current()
+	if !ok {
+		return []string{"", "", ""}
+	}
+	heading := "  " + Dim + "This will " + strings.ToLower(m.verb()) + ":" + Reset
+	command := "  " + Dim + "$ " + Truncate(item.Command, width-4) + Reset
+	directory := ""
+	if item.Directory != "" {
+		directory = "  " + Dim + "in " + Truncate(Abbreviate(item.Directory), width-5) + Reset
+	}
+	return []string{heading, command, directory}
+}
+
+func (m *model) verb() string {
+	item, ok := m.current()
+	if ok && (item.StateKind == StateRunning || item.StateKind == StateFinished) {
+		return "Focus"
+	}
+	return "Run"
+}
+
+func (m *model) hint() string {
+	switcher := ""
+	if len(m.running) > 0 {
+		switcher = "←/→ switch · "
+	}
+	current, ok := m.current()
+	restartable := ok && current.StateKind == StateFinished
+	if m.focusRunning {
+		actions := []string{"enter focus"}
+		if restartable {
+			actions = append(actions, "ctrl-r restart")
+		}
+		return switcher + strings.Join(actions, " · ") + " · esc close"
+	}
+	actions := []string{"enter " + strings.ToLower(m.verb()), "tab actions"}
+	if restartable {
+		actions = append(actions, "ctrl-r restart")
+	}
+	return switcher + strings.Join(actions, " · ") + " · esc close"
 }
 
 func splitRunning(items []Item) ([]Item, []Item) {
@@ -406,14 +504,14 @@ func readKey(reader *bufio.Reader) string {
 	}
 }
 
-func width(output io.Writer) int {
+func terminalSize(output io.Writer) (int, int) {
 	if file, ok := output.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		w, _, err := term.GetSize(int(file.Fd()))
+		w, h, err := term.GetSize(int(file.Fd()))
 		if err == nil {
-			return w - 2
+			return w, h
 		}
 	}
-	return 78
+	return 80, 24
 }
 
 func clamp(value, low, high int) int {

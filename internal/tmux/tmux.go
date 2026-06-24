@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/Martin-Nyaga/muxpad/internal/config"
 	"github.com/Martin-Nyaga/muxpad/internal/shellwords"
@@ -266,7 +267,11 @@ func (c *Client) Restart(pane Pane, definition config.Definition) error {
 
 func (c *Client) Attach(session string) error {
 	args := append(c.Prefix, "attach-session", "-t", session)
-	return exec.Command(args[0], args[1:]...).Run()
+	path, err := exec.LookPath(args[0])
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(path, args, os.Environ())
 }
 
 func (c *Client) Switch(session string) error {
@@ -342,7 +347,7 @@ func (c *Client) capture(args ...string) (string, error) {
 func (c *Client) captureAllow(args ...string) (string, error) {
 	result := c.run(append(c.Prefix, args...)...)
 	if !result.OK {
-		return "", fmt.Errorf("tmux %s failed: %s", first(args), strings.TrimSpace(result.Stderr))
+		return result.Stdout, nil
 	}
 	return result.Stdout, nil
 }

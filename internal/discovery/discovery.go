@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -256,11 +257,67 @@ func toString(value any) string {
 
 func excluded(id string, patterns []string) bool {
 	for _, pattern := range patterns {
-		if ok, _ := filepath.Match(pattern, id); ok {
+		if fnmatch(pattern, id) {
 			return true
 		}
 	}
 	return false
+}
+
+func fnmatch(pattern, value string) bool {
+	for _, expanded := range expandBraces(pattern) {
+		re := globRegexp(expanded)
+		if re.MatchString(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func expandBraces(pattern string) []string {
+	start := strings.Index(pattern, "{")
+	if start < 0 {
+		return []string{pattern}
+	}
+	end := strings.Index(pattern[start:], "}")
+	if end < 0 {
+		return []string{pattern}
+	}
+	end += start
+	prefix, suffix := pattern[:start], pattern[end+1:]
+	var out []string
+	for _, choice := range strings.Split(pattern[start+1:end], ",") {
+		for _, rest := range expandBraces(suffix) {
+			out = append(out, prefix+choice+rest)
+		}
+	}
+	return out
+}
+
+func globRegexp(pattern string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	inClass := false
+	for _, r := range pattern {
+		switch {
+		case inClass:
+			b.WriteRune(r)
+			if r == ']' {
+				inClass = false
+			}
+		case r == '*':
+			b.WriteString(".*")
+		case r == '?':
+			b.WriteString(".")
+		case r == '[':
+			inClass = true
+			b.WriteRune(r)
+		default:
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
 }
 
 func exists(path string) bool {
