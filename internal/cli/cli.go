@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/Martin-Nyaga/muxpad/internal/app"
 	"github.com/Martin-Nyaga/muxpad/internal/config"
@@ -160,7 +159,11 @@ func (c *CLI) runMenu(args []string) error {
 		return fmt.Errorf("menu accepts no arguments")
 	}
 	if c.Tmux.Inside() && os.Getenv("MUXPAD_POPUP") != "1" {
-		program, err := filepath.Abs(c.Program)
+		// Resolve the absolute path of the running binary so the popup can
+		// re-exec it regardless of how muxpad was invoked. os.Args[0] is just
+		// the bare name when found via PATH, and filepath.Abs would resolve it
+		// against the cwd, producing a path that does not exist.
+		program, err := os.Executable()
 		if err != nil {
 			program = c.Program
 		}
