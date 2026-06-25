@@ -91,11 +91,18 @@ func (p *Palette) Select(items []Item, sectionOrder []string) (Selection, bool, 
 	}
 	running, launch := splitRunning(items)
 	model := newModel(launch, running, sectionOrder)
+	prompt := p.Prompt
+	if prompt == "" {
+		prompt = "Muxpad"
+	}
 	render := func() {
 		columns, rows := terminalSize(p.Output)
 		fmt.Fprint(p.Output, "\033[?25l\033[H")
-		for _, line := range model.Render(columns-RightPad, rows, p.Prompt) {
-			fmt.Fprintf(p.Output, "%s\033[K\r\n", line)
+		for i, line := range model.Render(columns-RightPad, rows, prompt) {
+			if i > 0 {
+				fmt.Fprint(p.Output, "\r\n")
+			}
+			fmt.Fprintf(p.Output, "%s\033[K", line)
 		}
 		fmt.Fprint(p.Output, "\033[J")
 	}
@@ -318,6 +325,9 @@ func (m *model) move(delta int) {
 func (m *model) Render(totalWidth, totalRows int, prompt string) []string {
 	if totalWidth <= 0 {
 		totalWidth = 80
+	}
+	if prompt == "" {
+		prompt = "Muxpad"
 	}
 	listHeight := max(totalRows-Chrome, MinList)
 	top := []string{Bold + "  " + prompt + Reset, "", "  " + Bold + "❯" + Reset + " " + m.query, ""}
