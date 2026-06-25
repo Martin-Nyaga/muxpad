@@ -7,9 +7,17 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
+
+// escapeTimeout is how long readKey waits for the rest of an escape sequence
+// (e.g. arrow keys send ESC [ A) before treating a bare ESC as "escape". This
+// mirrors the Ruby palette's 20ms wait_readable; without it Peek would block on
+// a lone ESC until the next keypress, so dismissing the menu took several Escs.
+const escapeTimeout = 50 * time.Millisecond
 
 type StateKind string
 
@@ -141,9 +149,10 @@ func (p *Palette) Choose(options []Option, title string) (string, bool, error) {
 		fmt.Fprint(p.Output, "\033[?25h\033[2J\033[H")
 	}()
 	reader := bufio.NewReader(p.Input)
+	fd := int(p.Input.Fd())
 	for {
 		render()
-		key := readKey(reader)
+		key := readKey(reader, fd)
 		switch key {
 		case "up":
 			if cursor > 0 {
@@ -174,9 +183,10 @@ func (p *Palette) interact(render func(), handle func(string) (Selection, bool, 
 		fmt.Fprint(p.Output, "\033[?25h\033[2J\033[H")
 	}()
 	reader := bufio.NewReader(p.Input)
+	fd := int(p.Input.Fd())
 	for {
 		render()
-		key := readKey(reader)
+		key := readKey(reader, fd)
 		selection, ok, done := handle(key)
 		if done {
 			return selection, ok, nil
@@ -468,7 +478,7 @@ func splitRunning(items []Item) ([]Item, []Item) {
 	return running, launch
 }
 
-func readKey(reader *bufio.Reader) string {
+func readKey(reader *bufio.Reader, fd int) string {
 	r, _, err := reader.ReadRune()
 	if err != nil {
 		return "escape"
@@ -491,26 +501,53 @@ func readKey(reader *bufio.Reader) string {
 	case 0x15:
 		return "clear"
 	case 0x1b:
-		next, _ := reader.Peek(2)
-		if len(next) == 2 && next[0] == '[' {
-			_, _ = reader.Discard(2)
-			switch next[1] {
-			case 'A':
-				return "up"
-			case 'B':
-				return "down"
-			case 'C':
-				return "right"
-			case 'D':
-				return "left"
-			}
+		// Wait briefly for the rest of an escape sequence. A bare ESC has no
+		// follow-up bytes, so the poll times out and we treat it as "escape"
+		// without blocking on the next keypress.
+		if !waitReadable(reader, fd, escapeTimeout) {
+			return "escape"
 		}
-		return "escape"
+		if b, err := reader.ReadByte(); err != nil || b != '[' {
+			return "escape"
+		}
+		dir, err := reader.ReadByte()
+		if err != nil {
+			return "escape"
+		}
+		switch dir {
+		case 'A':
+			return "up"
+		case 'B':
+			return "down"
+		case 'C':
+			return "right"
+		case 'D':
+			return "left"
+		}
+		return "ignore"
 	default:
 		if r >= 0x20 && r < 0x7f {
 			return "char:" + string(r)
 		}
 		return "ignore"
+	}
+}
+
+// waitReadable reports whether more input is available within timeout, either
+// already buffered by the reader or arriving on fd. It retries on EINTR so a
+// signal does not spuriously report "no input".
+func waitReadable(reader *bufio.Reader, fd int, timeout time.Duration) bool {
+	if reader.Buffered() > 0 {
+		return true
+	}
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	ms := int(timeout.Milliseconds())
+	for {
+		n, err := unix.Poll(fds, ms)
+		if err == unix.EINTR {
+			continue
+		}
+		return err == nil && n > 0
 	}
 }
 
