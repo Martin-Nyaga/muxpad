@@ -1,0 +1,17 @@
+name = "Muxpad"
+description = "Muxpad task launcher for Herdr."
+min_herdr_version = "0.7.1"
+
+# Bind this action in ~/.config/herdr/config.toml, for example:
+# [[keys.command]]
+# key = "prefix+down"
+# type = "plugin_action"
+# plugin = "muxpad"
+# action = "launch-hardcoded"
+
+[[actions]]
+id = "launch-hardcoded"
+title = "Muxpad: Launch hardcoded task"
+description = "Create a Herdr tab and run the walking-skeleton command in its real shell."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["muxpad-herdr", "launch-hardcoded"]
