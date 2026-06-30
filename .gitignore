@@ -1,5 +1,6 @@
 # Machine-local reports, configurations, and scratch artifacts.
 .local/
+.sandcastle/
 
 # Local Go builds.
 /dist/
