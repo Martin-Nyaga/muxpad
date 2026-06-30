@@ -37,7 +37,7 @@ use.
 
 ## Requirements
 
-- Ruby 3.2 or newer
+- Go 1.26 or newer to build from source
 - tmux 3.3 or newer
 
 ## Setup
@@ -49,11 +49,11 @@ use.
    cp config.example.yml ~/.config/muxpad/config.yml
    ```
 
-2. Put this repository's `bin` directory on `PATH`, or link `muxpad` into a
-   directory already on `PATH`:
+2. Build the binary and put it on `PATH`:
 
    ```sh
-   ln -s "$PWD/bin/muxpad" ~/.local/bin/muxpad
+   go build -o dist/muxpad ./cmd/muxpad
+   ln -sf "$PWD/dist/muxpad" ~/.local/bin/muxpad
    ```
 
 3. Add one overridable tmux binding so `prefix + b` opens the palette (change
@@ -168,5 +168,13 @@ from your configured `TASK` entries, and will **never launch automatically**.
 ## Tests
 
 ```sh
+go test ./...
+```
+
+The original Ruby prototype is kept temporarily under `ruby/` while the Go port
+is validated. Its parity suite can still be run from that directory:
+
+```sh
+cd ruby
 ruby -w -Ilib:test -e 'Dir["test/**/*_test.rb"].sort.each { |file| require_relative file }'
 ```

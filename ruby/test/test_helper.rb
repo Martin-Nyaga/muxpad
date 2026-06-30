@@ -9,7 +9,7 @@ require "muxpad"
 
 class MuxpadTest < Minitest::Test
   def setup
-    @tmp = Dir.mktmpdir("muxpad-test")
+    @tmp = File.realpath(Dir.mktmpdir("muxpad-test"))
     @old_env = ENV.to_h
   end
 

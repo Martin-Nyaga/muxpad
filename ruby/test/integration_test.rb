@@ -28,7 +28,7 @@ class IntegrationTest < MuxpadTest
     FileUtils.mkdir_p(@mobile)
     @discovery_marker = File.join(@tmp, "discovered-ran")
     File.write(File.join(@project, "package.json"), JSON.generate(
-      name: "first", packageManager: "pnpm@9", workspaces: ["mobile"],
+      name: "first", packageManager: "npm@10", workspaces: ["mobile"],
       scripts: { duplicate: "sleep 30", rootcheck: "printf ok > #{@discovery_marker}; sleep 30" }
     ))
     File.write(File.join(@mobile, "package.json"), JSON.generate(
@@ -78,7 +78,7 @@ class IntegrationTest < MuxpadTest
             duplicate:
               name: duplicate
               description: Configured version wins
-              command: pnpm duplicate
+              command: npm run duplicate
           discovery:
             exclude:
               - "app-mobile:noise:*"
@@ -319,9 +319,8 @@ class IntegrationTest < MuxpadTest
     ENV["PATH"] = "#{bin}:#{ENV.fetch('PATH')}"
 
     Dir.chdir(@project) { @app.task("envcheck", attach: false) }
-    sleep 0.2
 
-    assert_equal "ok", File.read(marker)
+    assert_equal "ok", read_eventually(marker)
     refute managed("first", "task", "envcheck").first.done?
   end
 
@@ -338,8 +337,7 @@ class IntegrationTest < MuxpadTest
 
     @app.send(:handle_selection, "first", ["enter", "script:rootcheck"])
     @app.send(:handle_selection, "first", ["enter", "script:rootcheck"])
-    sleep 0.2
-    assert_equal "ok", File.read(@discovery_marker)
+    assert_equal "ok", read_eventually(@discovery_marker)
     assert_equal 1, managed("first", "script", "rootcheck").length
 
     package = JSON.parse(File.read(File.join(@project, "package.json")))
@@ -390,5 +388,14 @@ class IntegrationTest < MuxpadTest
 
   def kill_session(session)
     system("tmux", "-L", ENV.fetch("MUXPAD_TMUX_SOCKET"), "kill-session", "-t", session)
+  end
+
+  def read_eventually(path, timeout: 3)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    loop do
+      return File.read(path) if File.exist?(path)
+      raise Errno::ENOENT, path if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+      sleep 0.1
+    end
   end
 end
