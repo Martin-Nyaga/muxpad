@@ -1,4 +1,6 @@
+id = "muxpad"
 name = "Muxpad"
+version = "0.1.0"
 description = "Muxpad task launcher for Herdr."
 min_herdr_version = "0.7.1"
 
