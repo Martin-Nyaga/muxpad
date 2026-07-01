@@ -11,6 +11,12 @@ platforms = ["linux", "macos"]
 # type = "plugin_action"
 # command = "muxpad.open-palette"
 # description = "Muxpad: Open task palette"
+#
+# [[keys.command]]
+# key = "prefix+up"
+# type = "plugin_action"
+# command = "muxpad.open-project-palette"
+# description = "Muxpad: Open project launcher"
 
 # On `herdr plugin install`, Herdr runs this build step from the plugin root and
 # produces the action binary. Requires the Go toolchain on PATH. For local
@@ -29,9 +35,23 @@ contexts = ["global", "workspace", "tab", "pane"]
 # Herdr sets the child's working directory (Rust flags this as platform-specific).
 command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" open-palette']
 
+[[actions]]
+id = "open-project-palette"
+title = "Muxpad: Open project launcher"
+description = "Open the Muxpad fuzzy project launcher as a Herdr overlay pane."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" open-project-palette']
+
 [[panes]]
 id = "palette"
 title = "Muxpad"
 description = "Fuzzy-select a declared project task."
 placement = "overlay"
 command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" palette']
+
+[[panes]]
+id = "project-palette"
+title = "Muxpad Projects"
+description = "Fuzzy-select a configured project workspace."
+placement = "overlay"
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" project-palette']

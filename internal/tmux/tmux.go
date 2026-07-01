@@ -84,6 +84,19 @@ func (c *Client) Workspaces() []string {
 	return lines(out)
 }
 
+func (c *Client) WorkspaceList() ([]backend.Workspace, error) {
+	names := c.Workspaces()
+	workspaces := make([]backend.Workspace, 0, len(names))
+	for _, name := range names {
+		workspaces = append(workspaces, backend.Workspace{
+			ID:    name,
+			Label: name,
+			Root:  c.WorkspaceRoot(name),
+		})
+	}
+	return workspaces, nil
+}
+
 func (c *Client) CreateSession(name, root, projectID string) (string, error) {
 	pane, err := c.capture("new-session", "-d", "-P", "-F", "#{pane_id}", "-s", name, "-c", root, "-n", "shell")
 	if err != nil {
@@ -330,6 +343,10 @@ func (c *Client) Attach(session string) error {
 
 func (c *Client) Switch(session string) error {
 	return c.runBang("switch-client", "-t", session)
+}
+
+func (c *Client) FocusWorkspace(workspace string) error {
+	return c.Switch(workspace)
 }
 
 func (c *Client) PopupMenu(program string) error {

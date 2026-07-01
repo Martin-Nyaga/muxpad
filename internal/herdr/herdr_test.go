@@ -93,6 +93,87 @@ func TestOpenPaletteUsesHerdrOverlayPaneEntrypoint(t *testing.T) {
 	}
 }
 
+func TestOpenProjectPaletteUsesHerdrOverlayPaneEntrypoint(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", `{"workspace_id":"w1","focused_pane_id":"w1:p1"}`)
+	var got []string
+	client := &Client{
+		Bin: "herdr-test",
+		Run: func(args ...string) Result {
+			got = append([]string{}, args...)
+			return Result{OK: true}
+		},
+	}
+
+	if err := client.OpenProjectPalette(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"herdr-test", "plugin", "pane", "open",
+		"--plugin", "muxpad",
+		"--entrypoint", "project-palette",
+		"--placement", "overlay",
+		"--focus",
+		"--env", `MUXPAD_HERDR_CONTEXT_JSON={"workspace_id":"w1","focused_pane_id":"w1:p1"}`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestWorkspaceListReturnsWorkspaceRecordsWithRoots(t *testing.T) {
+	var calls [][]string
+	client := &Client{
+		Bin: "herdr-test",
+		Run: func(args ...string) Result {
+			calls = append(calls, append([]string{}, args...))
+			switch len(calls) {
+			case 1:
+				return Result{Stdout: `{"result":{"workspaces":[{"workspace_id":"w1","label":"Work"},{"workspace_id":"w2","label":"Other"}]}}`, OK: true}
+			case 2:
+				return Result{Stdout: `{"result":{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/repo"},{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/repo/services/api"},{"pane_id":"w2:p1","workspace_id":"w2","cwd":"/other"}]}}`, OK: true}
+			default:
+				t.Fatalf("unexpected call: %#v", args)
+				return Result{}
+			}
+		},
+	}
+
+	workspaces, err := client.WorkspaceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCalls := [][]string{
+		{"herdr-test", "workspace", "list"},
+		{"herdr-test", "pane", "list"},
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
+	}
+	want := []backend.Workspace{{ID: "w1", Label: "Work", Root: "/repo"}, {ID: "w2", Label: "Other", Root: "/other"}}
+	if !reflect.DeepEqual(workspaces, want) {
+		t.Fatalf("workspaces = %#v, want %#v", workspaces, want)
+	}
+}
+
+func TestFocusWorkspaceUsesHerdrWorkspaceFocus(t *testing.T) {
+	var got []string
+	client := &Client{
+		Bin: "herdr-test",
+		Run: func(args ...string) Result {
+			got = append([]string{}, args...)
+			return Result{OK: true}
+		},
+	}
+
+	if err := client.FocusWorkspace("w1"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"herdr-test", "workspace", "focus", "w1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestLaunchCreatesWorkspaceTabAndRunsDeclaredCommand(t *testing.T) {
 	var calls [][]string
 	client := &Client{
