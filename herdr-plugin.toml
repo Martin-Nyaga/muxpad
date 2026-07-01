@@ -3,6 +3,7 @@ name = "Muxpad"
 version = "0.1.0"
 description = "Muxpad task launcher for Herdr."
 min_herdr_version = "0.7.1"
+platforms = ["linux", "macos"]
 
 # Bind this action in ~/.config/herdr/config.toml, for example:
 # [[keys.command]]
@@ -11,9 +12,17 @@ min_herdr_version = "0.7.1"
 # command = "muxpad.launch-hardcoded"
 # description = "Muxpad: Launch hardcoded task"
 
+# On `herdr plugin install`, Herdr runs this build step from the plugin root and
+# produces the action binary. Requires the Go toolchain on PATH. For local
+# `herdr plugin link` (which skips build steps), build it yourself first:
+#   go build -o dist/muxpad-herdr ./cmd/muxpad-herdr
+[[build]]
+command = ["go", "build", "-o", "dist/muxpad-herdr", "./cmd/muxpad-herdr"]
+
 [[actions]]
 id = "launch-hardcoded"
 title = "Muxpad: Launch hardcoded task"
 description = "Create a Herdr tab and run the walking-skeleton command in its real shell."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["muxpad-herdr", "launch-hardcoded"]
+# Repo-relative path: Herdr runs action commands with the plugin root as cwd.
+command = ["./dist/muxpad-herdr", "launch-hardcoded"]
