@@ -196,6 +196,135 @@ exit_mode = "keep"
 	}
 }
 
+func TestLoadHerdrValidatesProjectAndTaskValues(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	must(t, os.MkdirAll(project, 0o755))
+	absoluteTaskDir := filepath.Join(tmp, "task")
+
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "invalid project id",
+			content: `
+[projects."bad project"]
+root = "` + project + `"
+`,
+			want: "invalid project identifier",
+		},
+		{
+			name: "missing project root",
+			content: `
+[projects.work]
+`,
+			want: `project "work" requires root`,
+		},
+		{
+			name: "invalid task id",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks."bad task"]
+name = "Bad"
+description = "bad task"
+command = "true"
+`,
+			want: "invalid task identifier",
+		},
+		{
+			name: "missing task command",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+`,
+			want: "requires command",
+		},
+		{
+			name: "missing task name",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+description = "web task"
+command = "true"
+`,
+			want: "requires a display name",
+		},
+		{
+			name: "missing task description",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+command = "true"
+`,
+			want: "requires a description",
+		},
+		{
+			name: "absolute task directory",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+command = "true"
+directory = "` + absoluteTaskDir + `"
+`,
+			want: "directory must be relative",
+		},
+		{
+			name: "invalid placement",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+command = "true"
+placement = "floating"
+`,
+			want: "invalid placement",
+		},
+		{
+			name: "invalid exit mode",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+command = "true"
+exit_mode = "detach"
+`,
+			want: "invalid exit mode",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadHerdrPath(writeHerdrConfig(t, tmp, tc.content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q error, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func loadConfig(t *testing.T, tmp, content string) *Config {
 	t.Helper()
 	cfg, err := LoadPath(writeConfig(t, tmp, content))
@@ -208,6 +337,13 @@ func loadConfig(t *testing.T, tmp, content string) *Config {
 func writeConfig(t *testing.T, tmp, content string) string {
 	t.Helper()
 	path := filepath.Join(tmp, "config.yml")
+	must(t, os.WriteFile(path, []byte(content), 0o644))
+	return path
+}
+
+func writeHerdrConfig(t *testing.T, tmp, content string) string {
+	t.Helper()
+	path := filepath.Join(tmp, strings.ReplaceAll(t.Name(), "/", "_")+".toml")
 	must(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
 }
