@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/Martin-Nyaga/muxpad/internal/cli"
+	"github.com/Martin-Nyaga/muxpad/internal/tmuxcli"
 )
 
 func main() {
-	os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(tmuxcli.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

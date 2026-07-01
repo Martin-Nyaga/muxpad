@@ -120,7 +120,7 @@ func TestAcceptingInsideTmuxSwitchCreatesDefaultsThenSwitches(t *testing.T) {
 func TestDirectAgentInsideOrdinarySessionTargetsCurrentPane(t *testing.T) {
 	cfg := &config.Config{Agents: []config.Definition{{ID: "codex", Name: "codex", Command: "sleep 30", Executable: "sleep", Placement: config.PlacementWindow, ExitMode: config.ExitClose, Enabled: true}}}
 	tmuxFake := &fakeTmux{inside: true, existing: true}
-	app := &Application{Config: cfg, Tmux: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{}, Palette: nil, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
+	app := &Application{Config: cfg, Backend: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{}, Palette: nil, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
 	if err := app.Agent("codex", config.PlacementHorizontal, false); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestUnmanagedDetectedAgentAppearsAsNumberedInstance(t *testing.T) {
 	managed := backend.Pane{ID: "%1", WindowIndex: "1", Kind: "agent", DefinitionID: "codex", Name: "codex", CurrentCommand: "node", Title: "Codex", PID: "100"}
 	unmanaged := backend.Pane{ID: "%2", WindowIndex: "2", CurrentCommand: "node", Title: "Investigate timeout", PID: "200"}
 	tmuxFake := &fakeTmux{panes: []backend.Pane{managed, unmanaged}}
-	app := &Application{Config: &config.Config{Agents: []config.Definition{}}, Tmux: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{"%2": "codex"}, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
+	app := &Application{Config: &config.Config{Agents: []config.Definition{}}, Backend: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{"%2": "codex"}, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
 	items, err := app.PaletteItems("work")
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func testApp(t *testing.T, project string, tmuxFake *fakeTmux) *Application {
 			Placement: config.PlacementWindow, ExitMode: config.ExitKeepOnError, Enabled: true, Executable: "sleep",
 		}},
 	}}, Agents: []config.Definition{{ID: "codex", Name: "codex", Description: "openai coding agent", Command: "sleep 30", Executable: "sleep", Placement: config.PlacementWindow, ExitMode: config.ExitClose, Enabled: true}}}
-	return &Application{Config: cfg, Tmux: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{}, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
+	return &Application{Config: cfg, Backend: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{}, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
 }
 
 type recordingPalette struct {

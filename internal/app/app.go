@@ -35,7 +35,7 @@ type AgentDetector interface {
 
 type Application struct {
 	Config         *config.Config
-	Tmux           backend.Backend
+	Backend        backend.Backend
 	Discovery      Discoverer
 	AgentDiscovery AgentDetector
 	Palette        Palette
@@ -46,7 +46,7 @@ type Application struct {
 func New(cfg *config.Config, backend backend.Backend) *Application {
 	return &Application{
 		Config:         cfg,
-		Tmux:           backend,
+		Backend:        backend,
 		Discovery:      discovery.Discovery{},
 		AgentDiscovery: agent.Discovery{},
 		Palette:        palette.New(),
@@ -69,8 +69,8 @@ func (a *Application) Start(projectID string, empty, attach bool) (string, error
 		project, hasProject = a.Config.ProjectFor(cwd)
 	}
 	session := a.sessionName(project, hasProject)
-	if a.Tmux.Inside() {
-		current, err := a.Tmux.CurrentWorkspace()
+	if a.Backend.Inside() {
+		current, err := a.Backend.CurrentWorkspace()
 		if err != nil {
 			return "", err
 		}
@@ -83,7 +83,7 @@ func (a *Application) Start(projectID string, empty, attach bool) (string, error
 		if _, _, err := a.ensureSession(project, hasProject, !empty); err != nil {
 			return "", err
 		}
-		return session, a.Tmux.Switch(session)
+		return session, a.Backend.Switch(session)
 	}
 	_, created, err := a.ensureSession(project, hasProject, !empty)
 	if err != nil {
@@ -93,7 +93,7 @@ func (a *Application) Start(projectID string, empty, attach bool) (string, error
 		_ = a.focusShell(session)
 	}
 	if attach {
-		return session, a.Tmux.Attach(session)
+		return session, a.Backend.Attach(session)
 	}
 	return session, nil
 }
@@ -113,15 +113,15 @@ func (a *Application) Menu(attach bool) (string, error) {
 	}
 	if !ok {
 		if created {
-			_ = a.Tmux.KillWorkspace(session)
+			_ = a.Backend.KillWorkspace(session)
 		}
 		return session, nil
 	}
 	if err := a.HandleSelection(session, selection); err != nil {
 		return "", err
 	}
-	if attach && !a.Tmux.Inside() {
-		return session, a.Tmux.Attach(session)
+	if attach && !a.Backend.Inside() {
+		return session, a.Backend.Attach(session)
 	}
 	return session, nil
 }
@@ -138,8 +138,8 @@ func (a *Application) Task(id string, placement config.Placement, attach bool) e
 	if err := a.launchTask(session, project, id, placement); err != nil {
 		return err
 	}
-	if attach && !a.Tmux.Inside() {
-		return a.Tmux.Attach(session)
+	if attach && !a.Backend.Inside() {
+		return a.Backend.Attach(session)
 	}
 	return nil
 }
@@ -152,8 +152,8 @@ func (a *Application) Agent(id string, placement config.Placement, attach bool) 
 	if err := a.launchAgent(session, id, placement); err != nil {
 		return err
 	}
-	if attach && !a.Tmux.Inside() {
-		return a.Tmux.Attach(session)
+	if attach && !a.Backend.Inside() {
+		return a.Backend.Attach(session)
 	}
 	return nil
 }
@@ -168,10 +168,10 @@ func (a *Application) ensureSession(project config.Project, hasProject, launchDe
 		root, _ = os.Getwd()
 	}
 	name := a.sessionName(project, hasProject)
-	if a.Tmux.WorkspaceExists(name) {
+	if a.Backend.WorkspaceExists(name) {
 		return name, false, nil
 	}
-	if _, err := a.Tmux.CreateWorkspace(name, root, projectID); err != nil {
+	if _, err := a.Backend.CreateWorkspace(name, root, projectID); err != nil {
 		return "", false, err
 	}
 	if hasProject && launchDefaults {
@@ -194,8 +194,8 @@ func (a *Application) sessionName(project config.Project, hasProject bool) strin
 
 func (a *Application) adhocName(path string) string {
 	root, _ := filepath.Abs(path)
-	for _, session := range a.Tmux.Workspaces() {
-		if a.Tmux.ProjectContext(session) == "" && a.Tmux.ManagedRoot(session) == root {
+	for _, session := range a.Backend.Workspaces() {
+		if a.Backend.ProjectContext(session) == "" && a.Backend.ManagedRoot(session) == root {
 			return session
 		}
 	}
@@ -212,20 +212,20 @@ func adhocBase(root string) string {
 }
 
 func (a *Application) availableName(base string) string {
-	if !a.Tmux.WorkspaceExists(base) {
+	if !a.Backend.WorkspaceExists(base) {
 		return base
 	}
 	for i := 2; ; i++ {
 		name := base + "-" + strconv.Itoa(i)
-		if !a.Tmux.WorkspaceExists(name) {
+		if !a.Backend.WorkspaceExists(name) {
 			return name
 		}
 	}
 }
 
 func (a *Application) sessionForCommand() (string, bool, error) {
-	if a.Tmux.Inside() {
-		session, err := a.Tmux.CurrentWorkspace()
+	if a.Backend.Inside() {
+		session, err := a.Backend.CurrentWorkspace()
 		return session, false, err
 	}
 	cwd, _ := os.Getwd()
@@ -234,11 +234,11 @@ func (a *Application) sessionForCommand() (string, bool, error) {
 }
 
 func (a *Application) projectForSession(session string) (config.Project, bool) {
-	id := a.Tmux.ProjectContext(session)
+	id := a.Backend.ProjectContext(session)
 	if id != "" {
 		return a.Config.Project(id)
 	}
-	if root := a.Tmux.WorkspaceRoot(session); root != "" {
+	if root := a.Backend.WorkspaceRoot(session); root != "" {
 		return a.Config.ProjectFor(root)
 	}
 	return config.Project{}, false
@@ -249,19 +249,19 @@ func (a *Application) launchTask(session string, project config.Project, id stri
 	if !ok {
 		return fmt.Errorf("unknown task %q for %s", id, project.Name)
 	}
-	panes, err := a.Tmux.Panes(session)
+	panes, err := a.Backend.Panes(session)
 	if err != nil {
 		return err
 	}
 	for _, pane := range panes {
 		if pane.Kind == "task" && pane.DefinitionID == id {
-			return a.Tmux.Focus(pane)
+			return a.Backend.Focus(pane)
 		}
 	}
 	if placement == "" {
 		placement = definition.Placement
 	}
-	_, err = a.Tmux.Launch(backend.LaunchSpec{
+	_, err = a.Backend.Launch(backend.LaunchSpec{
 		Workspace:  session,
 		Definition: definition,
 		Kind:       "task",
@@ -284,7 +284,7 @@ func (a *Application) launchAgent(session, id string, placement config.Placement
 	if !executable(definition.Executable) {
 		return fmt.Errorf("%s is unavailable: missing executable %s", definition.Name, definition.Executable)
 	}
-	panes, err := a.Tmux.Panes(session)
+	panes, err := a.Backend.Panes(session)
 	if err != nil {
 		return err
 	}
@@ -299,11 +299,11 @@ func (a *Application) launchAgent(session, id string, placement config.Placement
 		instance++
 	}
 	name := agentInstanceName(definition.Name, instance)
-	root := a.Tmux.WorkspaceRoot(session)
+	root := a.Backend.WorkspaceRoot(session)
 	if placement == "" {
 		placement = definition.Placement
 	}
-	_, err = a.Tmux.Launch(backend.LaunchSpec{
+	_, err = a.Backend.Launch(backend.LaunchSpec{
 		Workspace:  session,
 		Definition: agentLaunchDefinition(definition),
 		Kind:       "agent",
@@ -316,10 +316,10 @@ func (a *Application) launchAgent(session, id string, placement config.Placement
 }
 
 func (a *Application) launchTarget(session string) string {
-	if a.Tmux.Inside() {
-		current, _ := a.Tmux.CurrentWorkspace()
+	if a.Backend.Inside() {
+		current, _ := a.Backend.CurrentWorkspace()
 		if current == session {
-			pane, _ := a.Tmux.CurrentPane()
+			pane, _ := a.Backend.CurrentPane()
 			return pane
 		}
 	}
@@ -327,13 +327,13 @@ func (a *Application) launchTarget(session string) string {
 }
 
 func (a *Application) focusShell(session string) error {
-	panes, err := a.Tmux.Panes(session)
+	panes, err := a.Backend.Panes(session)
 	if err != nil {
 		return err
 	}
 	for _, pane := range panes {
 		if pane.Name == "" && pane.Window != "" {
-			return a.Tmux.Focus(pane)
+			return a.Backend.Focus(pane)
 		}
 	}
 	return nil
@@ -341,12 +341,12 @@ func (a *Application) focusShell(session string) error {
 
 func (a *Application) PaletteItems(session string) ([]palette.Item, error) {
 	project, hasProject := a.projectForSession(session)
-	panes, err := a.Tmux.Panes(session)
+	panes, err := a.Backend.Panes(session)
 	if err != nil {
 		return nil, err
 	}
 	scripts := a.discoveredScripts(session, project, hasProject)
-	root := a.Tmux.WorkspaceRoot(session)
+	root := a.Backend.WorkspaceRoot(session)
 	if hasProject {
 		root = project.Root
 	}
@@ -466,14 +466,14 @@ func (a *Application) HandleSelection(session string, selection palette.Selectio
 		return fmt.Errorf("invalid selection token: %s", selection.Token)
 	}
 	kind, id := parts[0], parts[1]
-	panes, err := a.Tmux.Panes(session)
+	panes, err := a.Backend.Panes(session)
 	if err != nil {
 		return err
 	}
 	if kind == "running" {
 		for _, pane := range panes {
 			if pane.ID == id {
-				return a.Tmux.Focus(pane)
+				return a.Backend.Focus(pane)
 			}
 		}
 		return fmt.Errorf("that agent instance is no longer running")
@@ -501,7 +501,7 @@ func (a *Application) HandleSelection(session string, selection palette.Selectio
 		definition, _ := project.Task(id)
 		pane, hasPane := findManaged(panes, "task", id)
 		if (action == "ctrl-r" || action == "restart") && hasPane {
-			return a.Tmux.Restart(pane, definition)
+			return a.Backend.Restart(pane, definition)
 		}
 		return a.launchTask(session, project, id, placement)
 	case "script":
@@ -512,9 +512,9 @@ func (a *Application) HandleSelection(session string, selection palette.Selectio
 		}
 		pane, hasPane := findManaged(panes, "script", id)
 		if (action == "ctrl-r" || action == "restart") && hasPane {
-			return a.Tmux.Restart(pane, definition)
+			return a.Backend.Restart(pane, definition)
 		}
-		root := a.Tmux.WorkspaceRoot(session)
+		root := a.Backend.WorkspaceRoot(session)
 		if hasProject {
 			root = project.Root
 		}
@@ -536,7 +536,7 @@ func (a *Application) actionMenu(session, kind, id string) (string, bool, error)
 		{Token: "horizontal", Label: "Horizontal split"},
 	}
 	if kind == "task" || kind == "script" {
-		panes, _ := a.Tmux.Panes(session)
+		panes, _ := a.Backend.Panes(session)
 		if pane, ok := findManaged(panes, kind, id); ok && pane.Done() {
 			options = append(options, palette.Option{Token: "restart", Label: "Restart in existing pane"})
 		}
@@ -545,7 +545,7 @@ func (a *Application) actionMenu(session, kind, id string) (string, bool, error)
 }
 
 func (a *Application) discoveredScripts(session string, project config.Project, hasProject bool) []config.Definition {
-	root := a.Tmux.WorkspaceRoot(session)
+	root := a.Backend.WorkspaceRoot(session)
 	excludes := []string(nil)
 	if hasProject {
 		root = project.Root
@@ -580,19 +580,19 @@ func (a *Application) discoveredScripts(session string, project config.Project, 
 }
 
 func (a *Application) launchScript(session string, definition config.Definition, root string, placement config.Placement) error {
-	panes, err := a.Tmux.Panes(session)
+	panes, err := a.Backend.Panes(session)
 	if err != nil {
 		return err
 	}
 	for _, pane := range panes {
 		if pane.Kind == "script" && pane.DefinitionID == definition.ID {
-			return a.Tmux.Focus(pane)
+			return a.Backend.Focus(pane)
 		}
 	}
 	if placement == "" {
 		placement = definition.Placement
 	}
-	_, err = a.Tmux.Launch(backend.LaunchSpec{
+	_, err = a.Backend.Launch(backend.LaunchSpec{
 		Workspace:  session,
 		Definition: definition,
 		Kind:       "script",

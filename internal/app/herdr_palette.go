@@ -14,13 +14,13 @@ var DeclaredTaskSectionOrder = []string{"Tasks", "Discovered scripts"}
 var ProjectSectionOrder = []string{"Projects"}
 
 func (a *Application) DeclaredTaskMenu() error {
-	workspace, err := a.Tmux.CurrentWorkspace()
+	workspace, err := a.Backend.CurrentWorkspace()
 	if err != nil {
 		return err
 	}
 	project, ok := a.projectForSession(workspace)
 	if !ok {
-		root := a.Tmux.WorkspaceRoot(workspace)
+		root := a.Backend.WorkspaceRoot(workspace)
 		if root == "" {
 			root = workspace
 		}
@@ -38,7 +38,7 @@ func (a *Application) DeclaredTaskMenu() error {
 }
 
 func (a *Application) herdrTaskItems(workspace string, project config.Project) ([]palette.Item, error) {
-	panes, err := a.Tmux.Panes(workspace)
+	panes, err := a.Backend.Panes(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -87,14 +87,14 @@ func (a *Application) OpenProject(projectID string) error {
 		return err
 	}
 	if ok {
-		return a.Tmux.FocusWorkspace(workspace.ID)
+		return a.Backend.FocusWorkspace(workspace.ID)
 	}
-	_, err = a.Tmux.CreateWorkspace(project.Name, project.Root, project.ID)
+	_, err = a.Backend.CreateWorkspace(project.Name, project.Root, project.ID)
 	return err
 }
 
 func (a *Application) projectItems() ([]palette.Item, error) {
-	workspaces, err := a.Tmux.WorkspaceList()
+	workspaces, err := a.Backend.WorkspaceList()
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (a *Application) projectItems() ([]palette.Item, error) {
 }
 
 func (a *Application) projectWorkspace(project config.Project) (backend.Workspace, bool, error) {
-	workspaces, err := a.Tmux.WorkspaceList()
+	workspaces, err := a.Backend.WorkspaceList()
 	if err != nil {
 		return backend.Workspace{}, false, err
 	}
@@ -132,7 +132,7 @@ func (a *Application) projectWorkspace(project config.Project) (backend.Workspac
 
 func projectWorkspaceFromList(a *Application, project config.Project, workspaces []backend.Workspace) (backend.Workspace, bool) {
 	for _, workspace := range workspaces {
-		if workspace.ID == project.ID || a.Tmux.ProjectContext(workspace.ID) == project.ID {
+		if workspace.ID == project.ID || a.Backend.ProjectContext(workspace.ID) == project.ID {
 			return workspace, true
 		}
 		if workspace.Root != "" {

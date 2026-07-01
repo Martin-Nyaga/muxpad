@@ -137,7 +137,7 @@ agents:
 	client := tmux.New()
 	application := &Application{
 		Config:         cfg,
-		Tmux:           client,
+		Backend:        client,
 		Discovery:      discovery.Discovery{},
 		AgentDiscovery: agent.Discovery{},
 		Palette:        stubPalette{},
