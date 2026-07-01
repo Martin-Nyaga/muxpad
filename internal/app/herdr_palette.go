@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Martin-Nyaga/muxpad/internal/backend"
 	"github.com/Martin-Nyaga/muxpad/internal/config"
 	"github.com/Martin-Nyaga/muxpad/internal/palette"
 )
@@ -24,6 +23,9 @@ func (a *Application) DeclaredTaskMenu() error {
 		}
 		return fmt.Errorf("no muxpad project configured for current herdr workspace (%s)", root)
 	}
+	if _, err := a.Tmux.Panes(workspace); err != nil {
+		return err
+	}
 	items := declaredTaskItems(project)
 	selection, ok, err := a.Palette.Select(items, DeclaredTaskSectionOrder)
 	if err != nil || !ok {
@@ -37,16 +39,7 @@ func (a *Application) DeclaredTaskMenu() error {
 	if !ok {
 		return fmt.Errorf("unknown task %q for %s", parts[1], project.Name)
 	}
-	_, err = a.Tmux.Launch(backend.LaunchSpec{
-		Workspace:  workspace,
-		Definition: task,
-		Kind:       "task",
-		Name:       task.Name,
-		Root:       project.Root,
-		Placement:  task.Placement,
-		Target:     a.launchTarget(workspace),
-	})
-	return err
+	return a.launchTask(workspace, project, task.ID, "")
 }
 
 func declaredTaskItems(project config.Project) []palette.Item {

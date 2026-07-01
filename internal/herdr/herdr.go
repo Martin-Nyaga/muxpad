@@ -23,8 +23,9 @@ type Result struct {
 type Runner func(args ...string) Result
 
 type Client struct {
-	Bin string
-	Run Runner
+	Bin      string
+	Run      Runner
+	StateDir string
 }
 
 type invocationContext struct {
@@ -149,9 +150,6 @@ func (c *Client) ManagedRoot(workspace string) string {
 
 func (c *Client) Panes(workspace string) ([]backend.Pane, error) {
 	args := []string{"pane", "list"}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
-	}
 	out, err := c.capture(args...)
 	if err != nil {
 		return nil, err
@@ -160,11 +158,7 @@ func (c *Client) Panes(workspace string) ([]backend.Pane, error) {
 	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
 		return nil, err
 	}
-	panes := make([]backend.Pane, 0, len(envelope.Result.Panes))
-	for _, pane := range envelope.Result.Panes {
-		panes = append(panes, pane.backendPane())
-	}
-	return panes, nil
+	return c.backendPanes(workspace, envelope.Result.Panes)
 }
 
 func (c *Client) Launch(spec backend.LaunchSpec) (string, error) {
@@ -175,6 +169,9 @@ func (c *Client) Launch(spec backend.LaunchSpec) (string, error) {
 	}
 	command := "exec " + backend.WrappedCommand(spec.Definition.Command, spec.Definition.ExitMode, backend.CommandWrapOptions{})
 	if err := c.RunInPane(pane, command); err != nil {
+		return "", err
+	}
+	if err := c.recordLaunch(spec, pane.ID, directory); err != nil {
 		return "", err
 	}
 	return pane.ID, nil

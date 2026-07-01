@@ -1,6 +1,9 @@
 package herdr
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,6 +133,101 @@ func TestLaunchCreatesWorkspaceTabAndRunsDeclaredCommand(t *testing.T) {
 	}
 }
 
+func TestLaunchRecordsPaneState(t *testing.T) {
+	stateDir := t.TempDir()
+	var calls [][]string
+	client := &Client{
+		Bin:      "herdr-test",
+		StateDir: stateDir,
+		Run: func(args ...string) Result {
+			calls = append(calls, append([]string{}, args...))
+			switch len(calls) {
+			case 1:
+				return Result{Stdout: `{"result":{"root_pane":{"pane_id":"w1:p2"}}}`, OK: true}
+			case 2:
+				return Result{OK: true}
+			default:
+				t.Fatalf("unexpected call: %#v", args)
+				return Result{}
+			}
+		},
+	}
+
+	_, err := client.Launch(backend.LaunchSpec{
+		Workspace: "w1",
+		Kind:      "task",
+		Name:      "API",
+		Root:      "/repo",
+		Definition: config.Definition{
+			ID:       "api",
+			Name:     "API",
+			Command:  "pnpm dev:api",
+			ExitMode: config.ExitKeep,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := readState(t, stateDir)
+	meta, ok := state.Panes["w1:p2"]
+	if !ok {
+		t.Fatalf("state panes = %#v, want w1:p2", state.Panes)
+	}
+	if meta.DefinitionID != "api" || meta.Kind != "task" || meta.Name != "API" || meta.Command != "pnpm dev:api" || meta.Directory != "/repo" || meta.ExitMode != config.ExitKeep || meta.Workspace != "w1" {
+		t.Fatalf("meta = %#v", meta)
+	}
+}
+
+func TestPanesAnnotatesFromStateAndDropsStaleEntries(t *testing.T) {
+	stateDir := t.TempDir()
+	initial := pluginState{Panes: map[string]paneState{
+		"w1:p1": {
+			DefinitionID: "api",
+			Kind:         "task",
+			Name:         "API",
+			Command:      "pnpm dev:api",
+			Directory:    "/repo/services/api",
+			ExitMode:     config.ExitKeepOnError,
+			Workspace:    "w1",
+		},
+		"w1:stale": {DefinitionID: "web", Kind: "task"},
+		"w2:p1":    {DefinitionID: "worker", Kind: "task", Workspace: "w2"},
+	}}
+	writeState(t, stateDir, initial)
+	var calls [][]string
+	client := &Client{
+		Bin:      "herdr-test",
+		StateDir: stateDir,
+		Run: func(args ...string) Result {
+			calls = append(calls, append([]string{}, args...))
+			return Result{Stdout: `{"result":{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"t1","cwd":"/repo","label":"raw"},{"pane_id":"w2:p1","workspace_id":"w2","tab_id":"t2","cwd":"/other"}]}}`, OK: true}
+		},
+	}
+
+	panes, err := client.Panes("w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCall := []string{"herdr-test", "pane", "list"}
+	if !reflect.DeepEqual(calls[0], wantCall) {
+		t.Fatalf("pane list call = %#v, want %#v", calls[0], wantCall)
+	}
+	if len(panes) != 1 {
+		t.Fatalf("panes = %#v", panes)
+	}
+	pane := panes[0]
+	if pane.ID != "w1:p1" || pane.Kind != "task" || pane.DefinitionID != "api" || pane.Name != "API" || pane.CurrentCommand != "pnpm dev:api" {
+		t.Fatalf("pane = %#v", pane)
+	}
+	state := readState(t, stateDir)
+	if _, ok := state.Panes["w1:stale"]; ok {
+		t.Fatalf("stale pane remained in state: %#v", state.Panes)
+	}
+	if _, ok := state.Panes["w2:p1"]; !ok {
+		t.Fatalf("live pane from another workspace was reconciled away: %#v", state.Panes)
+	}
+}
+
 func TestLaunchHonorsVerticalSplitPlacement(t *testing.T) {
 	var calls [][]string
 	client := &Client{
@@ -218,5 +316,29 @@ func TestPaneIDParsesNestedJSON(t *testing.T) {
 	got := paneID(`{"result":{"created_tab":{"tab_id":"t1"},"root_pane":{"pane_id":"p1"}}}`)
 	if got != "p1" {
 		t.Fatalf("paneID = %q, want p1", got)
+	}
+}
+
+func readState(t *testing.T, dir string) pluginState {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, stateFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state pluginState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func writeState(t *testing.T, dir string, state pluginState) {
+	t.Helper()
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, stateFileName), data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -205,6 +205,29 @@ func TestDeclaredTaskMenuResolvesProjectFromWorkspaceRootAndLaunchesSelection(t 
 	}
 }
 
+func TestDeclaredTaskMenuFocusesExistingTaskSelection(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{
+		inside: true,
+		root:   project,
+		panes: []backend.Pane{{
+			ID:           "w1:p1",
+			Kind:         "task",
+			DefinitionID: "server",
+			Name:         "Server",
+		}},
+	}
+	app := testApp(t, project, tmuxFake)
+	app.Palette = stubPalette{selectResult: palette.Selection{Action: "enter", Token: "task:server"}, selectOK: true}
+
+	if err := app.DeclaredTaskMenu(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tmuxFake.calls, []any{[]any{"focus", "w1:p1"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+}
+
 func testApp(t *testing.T, project string, tmuxFake *fakeTmux) *Application {
 	t.Helper()
 	cfg := &config.Config{Projects: []config.Project{{
