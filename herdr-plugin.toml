@@ -1,0 +1,57 @@
+id = "muxpad"
+name = "Muxpad"
+version = "0.1.0"
+description = "Muxpad task launcher for Herdr."
+min_herdr_version = "0.7.1"
+platforms = ["linux", "macos"]
+
+# Bind this action in ~/.config/herdr/config.toml, for example:
+# [[keys.command]]
+# key = "prefix+down"
+# type = "plugin_action"
+# command = "muxpad.open-palette"
+# description = "Muxpad: Open task palette"
+#
+# [[keys.command]]
+# key = "prefix+up"
+# type = "plugin_action"
+# command = "muxpad.open-project-palette"
+# description = "Muxpad: Open project launcher"
+
+# On `herdr plugin install`, Herdr runs this build step from the plugin root and
+# produces the action binary. Requires the Go toolchain on PATH. For local
+# `herdr plugin link` (which skips build steps), build it yourself first:
+#   go build -o dist/muxpad-herdr ./cmd/muxpad-herdr
+[[build]]
+command = ["go", "build", "-o", "dist/muxpad-herdr", "./cmd/muxpad-herdr"]
+
+[[actions]]
+id = "open-palette"
+title = "Muxpad: Open task palette"
+description = "Open the Muxpad fuzzy task palette as a Herdr overlay pane."
+contexts = ["global", "workspace", "tab", "pane"]
+# Resolve the built binary via the absolute HERDR_PLUGIN_ROOT that Herdr injects.
+# A bare name would need it on PATH; a relative program path is ambiguous once
+# Herdr sets the child's working directory (Rust flags this as platform-specific).
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" open-palette']
+
+[[actions]]
+id = "open-project-palette"
+title = "Muxpad: Open project launcher"
+description = "Open the Muxpad fuzzy project launcher as a Herdr overlay pane."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" open-project-palette']
+
+[[panes]]
+id = "palette"
+title = "Task Launcher"
+description = "Fuzzy-select a declared project task or discovered package script."
+placement = "overlay"
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" palette']
+
+[[panes]]
+id = "project-palette"
+title = "Projects"
+description = "Fuzzy-select a configured project workspace."
+placement = "overlay"
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" project-palette']

@@ -115,6 +115,216 @@ projects:
 	}
 }
 
+func TestLoadHerdrMissingAndEmptyConfigAreValid(t *testing.T) {
+	tmp := t.TempDir()
+	cfg, err := LoadHerdrPath(filepath.Join(tmp, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Projects) != 0 || len(cfg.Agents) != 0 {
+		t.Fatalf("cfg = %#v", cfg)
+	}
+	path := filepath.Join(tmp, "empty.toml")
+	must(t, os.WriteFile(path, []byte("  \n"), 0o644))
+	cfg, err = LoadHerdrPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Projects) != 0 {
+		t.Fatalf("projects = %#v", cfg.Projects)
+	}
+}
+
+func TestLoadHerdrParsesProjectsAndDeclaredTasks(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	must(t, os.MkdirAll(project, 0o755))
+	path := filepath.Join(tmp, "config.toml")
+	must(t, os.WriteFile(path, []byte(`
+[projects.work]
+name = "Work"
+root = "`+project+`"
+default_tasks = ["web"]
+
+[projects.work.discovery]
+exclude = ["*:postinstall"]
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web dev server"
+command = "pnpm dev"
+
+[projects.work.tasks.api]
+name = "API"
+description = "api dev server"
+command = "pnpm api"
+directory = "services/api"
+placement = "vertical"
+exit_mode = "keep"
+`), 0o644))
+	cfg, err := LoadHerdrPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectCfg, ok := cfg.Project("work")
+	if !ok {
+		t.Fatalf("projects = %#v", cfg.Projects)
+	}
+	resolvedProject, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectCfg.Name != "Work" || projectCfg.Root != resolvedProject || !reflect.DeepEqual(projectCfg.DefaultTasks, []string{"web"}) {
+		t.Fatalf("project = %#v", projectCfg)
+	}
+	if !reflect.DeepEqual(projectCfg.DiscoveryExclude, []string{"*:postinstall"}) {
+		t.Fatalf("exclude = %#v", projectCfg.DiscoveryExclude)
+	}
+	if got := defIDs(projectCfg.Tasks); !reflect.DeepEqual(got, []string{"web", "api"}) {
+		t.Fatalf("task order = %v", got)
+	}
+	api, _ := projectCfg.Task("api")
+	if api.Directory != "services/api" || api.Placement != PlacementVertical || api.ExitMode != ExitKeep {
+		t.Fatalf("api = %#v", api)
+	}
+	web, _ := projectCfg.Task("web")
+	if web.Placement != PlacementWindow || web.ExitMode != ExitKeepOnError {
+		t.Fatalf("web defaults = %#v", web)
+	}
+	if len(cfg.Agents) != 0 {
+		t.Fatalf("herdr config should not load tmux agents: %#v", cfg.Agents)
+	}
+}
+
+func TestLoadHerdrValidatesProjectAndTaskValues(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	must(t, os.MkdirAll(project, 0o755))
+	absoluteTaskDir := filepath.Join(tmp, "task")
+
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "invalid project id",
+			content: `
+[projects."bad project"]
+root = "` + project + `"
+`,
+			want: "invalid project identifier",
+		},
+		{
+			name: "missing project root",
+			content: `
+[projects.work]
+`,
+			want: `project "work" requires root`,
+		},
+		{
+			name: "invalid task id",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks."bad task"]
+name = "Bad"
+description = "bad task"
+command = "true"
+`,
+			want: "invalid task identifier",
+		},
+		{
+			name: "missing task command",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+`,
+			want: "requires command",
+		},
+		{
+			name: "missing task name",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+description = "web task"
+command = "true"
+`,
+			want: "requires a display name",
+		},
+		{
+			name: "missing task description",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+command = "true"
+`,
+			want: "requires a description",
+		},
+		{
+			name: "absolute task directory",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+command = "true"
+directory = "` + absoluteTaskDir + `"
+`,
+			want: "directory must be relative",
+		},
+		{
+			name: "invalid placement",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+command = "true"
+placement = "floating"
+`,
+			want: "invalid placement",
+		},
+		{
+			name: "invalid exit mode",
+			content: `
+[projects.work]
+root = "` + project + `"
+
+[projects.work.tasks.web]
+name = "Web"
+description = "web task"
+command = "true"
+exit_mode = "detach"
+`,
+			want: "invalid exit mode",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadHerdrPath(writeHerdrConfig(t, tmp, tc.content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q error, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func loadConfig(t *testing.T, tmp, content string) *Config {
 	t.Helper()
 	cfg, err := LoadPath(writeConfig(t, tmp, content))
@@ -127,6 +337,13 @@ func loadConfig(t *testing.T, tmp, content string) *Config {
 func writeConfig(t *testing.T, tmp, content string) string {
 	t.Helper()
 	path := filepath.Join(tmp, "config.yml")
+	must(t, os.WriteFile(path, []byte(content), 0o644))
+	return path
+}
+
+func writeHerdrConfig(t *testing.T, tmp, content string) string {
+	t.Helper()
+	path := filepath.Join(tmp, strings.ReplaceAll(t.Name(), "/", "_")+".toml")
 	must(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
 }

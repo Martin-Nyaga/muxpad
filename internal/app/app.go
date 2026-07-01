@@ -11,34 +11,14 @@ import (
 	"strings"
 
 	"github.com/Martin-Nyaga/muxpad/internal/agent"
+	"github.com/Martin-Nyaga/muxpad/internal/backend"
 	"github.com/Martin-Nyaga/muxpad/internal/config"
 	"github.com/Martin-Nyaga/muxpad/internal/discovery"
 	"github.com/Martin-Nyaga/muxpad/internal/palette"
 	"github.com/Martin-Nyaga/muxpad/internal/shellwords"
-	"github.com/Martin-Nyaga/muxpad/internal/tmux"
 )
 
 var SectionOrder = []string{"Tasks", "Agents", "Discovered scripts"}
-
-type Tmux interface {
-	Inside() bool
-	CurrentSession() (string, error)
-	CurrentPane() (string, error)
-	SessionExists(string) bool
-	Sessions() []string
-	CreateSession(name, root, projectID string) (string, error)
-	ProjectContext(session string) string
-	SessionRoot(session string) string
-	ManagedRoot(session string) string
-	Panes(session string) ([]tmux.Pane, error)
-	Launch(tmux.LaunchSpec) (string, error)
-	Focus(tmux.Pane) error
-	Restart(tmux.Pane, config.Definition) error
-	Attach(session string) error
-	Switch(session string) error
-	PopupMenu(program string) error
-	KillSession(session string) error
-}
 
 type Palette interface {
 	Select(items []palette.Item, sectionOrder []string) (palette.Selection, bool, error)
@@ -55,7 +35,7 @@ type AgentDetector interface {
 
 type Application struct {
 	Config         *config.Config
-	Tmux           Tmux
+	Tmux           backend.Backend
 	Discovery      Discoverer
 	AgentDiscovery AgentDetector
 	Palette        Palette
@@ -63,20 +43,16 @@ type Application struct {
 	Output         io.Writer
 }
 
-func New() (*Application, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, err
-	}
+func New(cfg *config.Config, backend backend.Backend) *Application {
 	return &Application{
 		Config:         cfg,
-		Tmux:           tmux.New(),
+		Tmux:           backend,
 		Discovery:      discovery.Discovery{},
 		AgentDiscovery: agent.Discovery{},
 		Palette:        palette.New(),
 		Input:          os.Stdin,
 		Output:         os.Stdout,
-	}, nil
+	}
 }
 
 func (a *Application) Start(projectID string, empty, attach bool) (string, error) {
@@ -94,7 +70,7 @@ func (a *Application) Start(projectID string, empty, attach bool) (string, error
 	}
 	session := a.sessionName(project, hasProject)
 	if a.Tmux.Inside() {
-		current, err := a.Tmux.CurrentSession()
+		current, err := a.Tmux.CurrentWorkspace()
 		if err != nil {
 			return "", err
 		}
@@ -137,7 +113,7 @@ func (a *Application) Menu(attach bool) (string, error) {
 	}
 	if !ok {
 		if created {
-			_ = a.Tmux.KillSession(session)
+			_ = a.Tmux.KillWorkspace(session)
 		}
 		return session, nil
 	}
@@ -192,10 +168,10 @@ func (a *Application) ensureSession(project config.Project, hasProject, launchDe
 		root, _ = os.Getwd()
 	}
 	name := a.sessionName(project, hasProject)
-	if a.Tmux.SessionExists(name) {
+	if a.Tmux.WorkspaceExists(name) {
 		return name, false, nil
 	}
-	if _, err := a.Tmux.CreateSession(name, root, projectID); err != nil {
+	if _, err := a.Tmux.CreateWorkspace(name, root, projectID); err != nil {
 		return "", false, err
 	}
 	if hasProject && launchDefaults {
@@ -218,7 +194,7 @@ func (a *Application) sessionName(project config.Project, hasProject bool) strin
 
 func (a *Application) adhocName(path string) string {
 	root, _ := filepath.Abs(path)
-	for _, session := range a.Tmux.Sessions() {
+	for _, session := range a.Tmux.Workspaces() {
 		if a.Tmux.ProjectContext(session) == "" && a.Tmux.ManagedRoot(session) == root {
 			return session
 		}
@@ -236,12 +212,12 @@ func adhocBase(root string) string {
 }
 
 func (a *Application) availableName(base string) string {
-	if !a.Tmux.SessionExists(base) {
+	if !a.Tmux.WorkspaceExists(base) {
 		return base
 	}
 	for i := 2; ; i++ {
 		name := base + "-" + strconv.Itoa(i)
-		if !a.Tmux.SessionExists(name) {
+		if !a.Tmux.WorkspaceExists(name) {
 			return name
 		}
 	}
@@ -249,7 +225,7 @@ func (a *Application) availableName(base string) string {
 
 func (a *Application) sessionForCommand() (string, bool, error) {
 	if a.Tmux.Inside() {
-		session, err := a.Tmux.CurrentSession()
+		session, err := a.Tmux.CurrentWorkspace()
 		return session, false, err
 	}
 	cwd, _ := os.Getwd()
@@ -259,10 +235,13 @@ func (a *Application) sessionForCommand() (string, bool, error) {
 
 func (a *Application) projectForSession(session string) (config.Project, bool) {
 	id := a.Tmux.ProjectContext(session)
-	if id == "" {
-		return config.Project{}, false
+	if id != "" {
+		return a.Config.Project(id)
 	}
-	return a.Config.Project(id)
+	if root := a.Tmux.WorkspaceRoot(session); root != "" {
+		return a.Config.ProjectFor(root)
+	}
+	return config.Project{}, false
 }
 
 func (a *Application) launchTask(session string, project config.Project, id string, placement config.Placement) error {
@@ -282,8 +261,8 @@ func (a *Application) launchTask(session string, project config.Project, id stri
 	if placement == "" {
 		placement = definition.Placement
 	}
-	_, err = a.Tmux.Launch(tmux.LaunchSpec{
-		Session:    session,
+	_, err = a.Tmux.Launch(backend.LaunchSpec{
+		Workspace:  session,
 		Definition: definition,
 		Kind:       "task",
 		Name:       definition.Name,
@@ -320,12 +299,12 @@ func (a *Application) launchAgent(session, id string, placement config.Placement
 		instance++
 	}
 	name := agentInstanceName(definition.Name, instance)
-	root := a.Tmux.SessionRoot(session)
+	root := a.Tmux.WorkspaceRoot(session)
 	if placement == "" {
 		placement = definition.Placement
 	}
-	_, err = a.Tmux.Launch(tmux.LaunchSpec{
-		Session:    session,
+	_, err = a.Tmux.Launch(backend.LaunchSpec{
+		Workspace:  session,
 		Definition: agentLaunchDefinition(definition),
 		Kind:       "agent",
 		Name:       name,
@@ -338,7 +317,7 @@ func (a *Application) launchAgent(session, id string, placement config.Placement
 
 func (a *Application) launchTarget(session string) string {
 	if a.Tmux.Inside() {
-		current, _ := a.Tmux.CurrentSession()
+		current, _ := a.Tmux.CurrentWorkspace()
 		if current == session {
 			pane, _ := a.Tmux.CurrentPane()
 			return pane
@@ -367,7 +346,7 @@ func (a *Application) PaletteItems(session string) ([]palette.Item, error) {
 		return nil, err
 	}
 	scripts := a.discoveredScripts(session, project, hasProject)
-	root := a.Tmux.SessionRoot(session)
+	root := a.Tmux.WorkspaceRoot(session)
 	if hasProject {
 		root = project.Root
 	}
@@ -405,7 +384,7 @@ func (a *Application) PaletteItems(session string) ([]palette.Item, error) {
 	return items, nil
 }
 
-func (a *Application) instanceItem(token string, definition config.Definition, pane tmux.Pane) palette.Item {
+func (a *Application) instanceItem(token string, definition config.Definition, pane backend.Pane) palette.Item {
 	if !pane.Done() {
 		return a.runningItem(pane, "window "+pane.WindowIndex+" · "+pane.CurrentCommand)
 	}
@@ -421,7 +400,7 @@ func (a *Application) instanceItem(token string, definition config.Definition, p
 	}
 }
 
-func launchableItem(token, section string, definition config.Definition, pane tmux.Pane, hasPane bool, root string) palette.Item {
+func launchableItem(token, section string, definition config.Definition, pane backend.Pane, hasPane bool, root string) palette.Item {
 	state := "not running"
 	kind := palette.StateIdle
 	if hasPane {
@@ -468,7 +447,7 @@ func agentItem(agent config.Definition, root string) palette.Item {
 	}
 }
 
-func (a *Application) runningItem(pane tmux.Pane, description string) palette.Item {
+func (a *Application) runningItem(pane backend.Pane, description string) palette.Item {
 	return palette.Item{
 		Token:       "running:" + pane.ID,
 		Section:     palette.RunningSection,
@@ -535,7 +514,11 @@ func (a *Application) HandleSelection(session string, selection palette.Selectio
 		if (action == "ctrl-r" || action == "restart") && hasPane {
 			return a.Tmux.Restart(pane, definition)
 		}
-		return a.launchScript(session, definition, placement)
+		root := a.Tmux.WorkspaceRoot(session)
+		if hasProject {
+			root = project.Root
+		}
+		return a.launchScript(session, definition, root, placement)
 	case "agent":
 		if action == "ctrl-r" || action == "restart" {
 			return fmt.Errorf("restart applies only to tasks and package scripts")
@@ -562,7 +545,7 @@ func (a *Application) actionMenu(session, kind, id string) (string, bool, error)
 }
 
 func (a *Application) discoveredScripts(session string, project config.Project, hasProject bool) []config.Definition {
-	root := a.Tmux.SessionRoot(session)
+	root := a.Tmux.WorkspaceRoot(session)
 	excludes := []string(nil)
 	if hasProject {
 		root = project.Root
@@ -596,7 +579,7 @@ func (a *Application) discoveredScripts(session string, project config.Project, 
 	return out
 }
 
-func (a *Application) launchScript(session string, definition config.Definition, placement config.Placement) error {
+func (a *Application) launchScript(session string, definition config.Definition, root string, placement config.Placement) error {
 	panes, err := a.Tmux.Panes(session)
 	if err != nil {
 		return err
@@ -606,12 +589,11 @@ func (a *Application) launchScript(session string, definition config.Definition,
 			return a.Tmux.Focus(pane)
 		}
 	}
-	root := a.Tmux.SessionRoot(session)
 	if placement == "" {
 		placement = definition.Placement
 	}
-	_, err = a.Tmux.Launch(tmux.LaunchSpec{
-		Session:    session,
+	_, err = a.Tmux.Launch(backend.LaunchSpec{
+		Workspace:  session,
 		Definition: definition,
 		Kind:       "script",
 		Name:       definition.Name,
@@ -663,7 +645,7 @@ func agentLaunchDefinition(definition config.Definition) config.Definition {
 	return definition
 }
 
-func AgentSummary(pane tmux.Pane) string {
+func AgentSummary(pane backend.Pane) string {
 	if pane.DefinitionID != "claude" && pane.DefinitionID != "codex" {
 		return ""
 	}
@@ -689,7 +671,7 @@ func AgentSummary(pane tmux.Pane) string {
 	return title
 }
 
-func (a *Application) discoveredAgentItems(panes []tmux.Pane) []palette.Item {
+func (a *Application) discoveredAgentItems(panes []backend.Pane) []palette.Item {
 	var unmanaged []agent.Pane
 	for _, pane := range panes {
 		if pane.Kind == "" && !pane.Done() && atoi(pane.PID) > 0 {
@@ -735,13 +717,13 @@ func (a *Application) confirmSwitch(session string) bool {
 	return answer == "y" || answer == "yes"
 }
 
-func findManaged(panes []tmux.Pane, kind, id string) (tmux.Pane, bool) {
+func findManaged(panes []backend.Pane, kind, id string) (backend.Pane, bool) {
 	for _, pane := range panes {
 		if pane.Kind == kind && pane.DefinitionID == id {
 			return pane, true
 		}
 	}
-	return tmux.Pane{}, false
+	return backend.Pane{}, false
 }
 
 func findDefinition(defs []config.Definition, id string) config.Definition {

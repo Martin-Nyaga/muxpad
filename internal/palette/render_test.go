@@ -30,7 +30,7 @@ func TestSidebarKeepsSingleLineItemWhenSummaryIsMissing(t *testing.T) {
 	}
 }
 
-func TestRenderIncludesSearchPreviewHintAndPrompt(t *testing.T) {
+func TestRenderIncludesQueryDetailBoxAndHint(t *testing.T) {
 	item := Item{
 		Token:       "task:server",
 		Section:     "Tasks",
@@ -43,11 +43,42 @@ func TestRenderIncludesSearchPreviewHintAndPrompt(t *testing.T) {
 	}
 	model := newModel([]Item{item}, nil, []string{"Tasks"})
 	model.query = "srv"
-	lines := strings.Join(model.Render(80, 24, "Muxpad"), "\n")
-	for _, want := range []string{"Muxpad", "srv", "This will run:", "$ npm run dev", "in /tmp/work", "enter run", "tab actions"} {
+	lines := strings.Join(model.Render(80, 24), "\n")
+	// Query echoed, rounded accent box with the "Run" verb title, command and
+	// directory preview lines, and the key hint with placement actions.
+	for _, want := range []string{"srv", "╭─", "Run", "npm run dev", "/tmp/work", "enter run", "tab actions"} {
 		if !strings.Contains(lines, want) {
 			t.Fatalf("rendered palette missing %q:\n%s", want, lines)
 		}
+	}
+}
+
+func TestRenderEmptyQueryShowsPlaceholder(t *testing.T) {
+	item := Item{Token: "task:server", Section: "Tasks", Name: "Server", Command: "npm run dev", StateKind: StateIdle}
+	model := newModel([]Item{item}, nil, []string{"Tasks"})
+	lines := strings.Join(model.Render(80, 24), "\n")
+	if !strings.Contains(lines, "Type to filter") {
+		t.Fatalf("empty query should show placeholder:\n%s", lines)
+	}
+}
+
+func TestRenderProjectEntryOpensWithoutTabActions(t *testing.T) {
+	item := Item{
+		Token:       "project:web",
+		Section:     "Projects",
+		Name:        "web",
+		Description: "~/code/web",
+		Directory:   "/home/user/code/web",
+		State:       "new workspace",
+		StateKind:   StateAvailable,
+	}
+	model := newModel([]Item{item}, nil, []string{"Projects"})
+	lines := strings.Join(model.Render(80, 24), "\n")
+	if !strings.Contains(lines, "Open") || !strings.Contains(lines, "enter open") {
+		t.Fatalf("project entry should use the Open verb:\n%s", lines)
+	}
+	if strings.Contains(lines, "tab actions") {
+		t.Fatalf("project entry should not offer placement actions:\n%s", lines)
 	}
 }
 

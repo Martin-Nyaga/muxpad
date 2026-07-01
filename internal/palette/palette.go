@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"time"
@@ -53,7 +54,6 @@ type Option struct {
 }
 
 const (
-	Chrome              = 10
 	MinList             = 3
 	RightPad            = 2
 	Reset               = "\033[0m"
@@ -61,6 +61,12 @@ const (
 	Dim                 = "\033[2m"
 	Reverse             = "\033[7m"
 	Header              = "\033[1;35m"
+	// Accent is the ayu theme orange (#ff8f40) as a truecolor foreground, used
+	// for the selected-row bar and the detail box border.
+	Accent = "\033[38;2;255;143;64m"
+	// Muted is the ayu surface_dim (#273747), a subtle grey for the divider
+	// between the running sidebar and the searchable list.
+	Muted               = "\033[38;2;39;55;71m"
 	RunningSection      = "Running"
 	SidebarWidth        = 20
 	SummarySidebarWidth = 30
@@ -99,14 +105,10 @@ func (p *Palette) Select(items []Item, sectionOrder []string) (Selection, bool, 
 	}
 	running, launch := splitRunning(items)
 	model := newModel(launch, running, sectionOrder)
-	prompt := p.Prompt
-	if prompt == "" {
-		prompt = "Muxpad"
-	}
 	render := func() {
 		columns, rows := terminalSize(p.Output)
 		fmt.Fprint(p.Output, "\033[?25l\033[H")
-		for i, line := range model.Render(columns-RightPad, rows, prompt) {
+		for i, line := range model.Render(columns-RightPad, rows) {
 			if i > 0 {
 				fmt.Fprint(p.Output, "\r\n")
 			}
@@ -148,11 +150,7 @@ func (p *Palette) Choose(options []Option, title string) (string, bool, error) {
 		_ = term.Restore(int(p.Input.Fd()), oldState)
 		fmt.Fprint(p.Output, "\033[?25h\033[2J\033[H")
 	}()
-	reader := bufio.NewReader(p.Input)
-	fd := int(p.Input.Fd())
-	for {
-		render()
-		key := readKey(reader, fd)
+	handle := func(key string) (Selection, bool, bool) {
 		switch key {
 		case "up":
 			if cursor > 0 {
@@ -164,13 +162,19 @@ func (p *Palette) Choose(options []Option, title string) (string, bool, error) {
 			}
 		case "enter":
 			if len(options) == 0 {
-				return "", false, nil
+				return Selection{}, false, true
 			}
-			return options[cursor].Token, true, nil
+			return Selection{Token: options[cursor].Token}, true, true
 		case "escape", "cancel":
-			return "", false, nil
+			return Selection{}, false, true
 		}
+		return Selection{}, false, false
 	}
+	keys := p.readKeys()
+	resize := watchResize()
+	defer signal.Stop(resize)
+	selection, ok := runLoop(render, handle, keys, resize)
+	return selection.Token, ok, nil
 }
 
 func (p *Palette) interact(render func(), handle func(string) (Selection, bool, bool)) (Selection, bool, error) {
@@ -182,14 +186,56 @@ func (p *Palette) interact(render func(), handle func(string) (Selection, bool, 
 		_ = term.Restore(int(p.Input.Fd()), oldState)
 		fmt.Fprint(p.Output, "\033[?25h\033[2J\033[H")
 	}()
+	keys := p.readKeys()
+	resize := watchResize()
+	defer signal.Stop(resize)
+	selection, ok := runLoop(render, handle, keys, resize)
+	return selection, ok, nil
+}
+
+// readKeys pumps decoded keys onto a channel from a background reader. The
+// palette process is short-lived, so a reader parked on Stdin after the loop
+// returns is harmless.
+func (p *Palette) readKeys() <-chan string {
+	keys := make(chan string)
 	reader := bufio.NewReader(p.Input)
 	fd := int(p.Input.Fd())
+	go func() {
+		for {
+			keys <- readKey(reader, fd)
+		}
+	}()
+	return keys
+}
+
+// watchResize delivers SIGWINCH so the loop can repaint. Overlay panes (herdr
+// overlays, tmux popups) often settle their size just after the child starts;
+// without this the first paint is drawn at the wrong size and only corrected on
+// the next keypress.
+func watchResize() chan os.Signal {
+	resize := make(chan os.Signal, 1)
+	signal.Notify(resize, unix.SIGWINCH)
+	return resize
+}
+
+// runLoop renders once, then repaints on every key and on every resize, ending
+// when handle reports it is done. Splitting this out keeps the event handling
+// testable without a real terminal.
+func runLoop(render func(), handle func(string) (Selection, bool, bool), keys <-chan string, resize <-chan os.Signal) (Selection, bool) {
+	render()
 	for {
-		render()
-		key := readKey(reader, fd)
-		selection, ok, done := handle(key)
-		if done {
-			return selection, ok, nil
+		select {
+		case <-resize:
+			render()
+		case key, open := <-keys:
+			if !open {
+				return Selection{}, false
+			}
+			selection, ok, done := handle(key)
+			if done {
+				return selection, ok
+			}
+			render()
 		}
 	}
 }
@@ -332,18 +378,14 @@ func (m *model) move(delta int) {
 	m.cursor = clamp(m.cursor+delta, 0, len(m.selectable)-1)
 }
 
-func (m *model) Render(totalWidth, totalRows int, prompt string) []string {
+func (m *model) Render(totalWidth, totalRows int) []string {
 	if totalWidth <= 0 {
 		totalWidth = 80
 	}
-	if prompt == "" {
-		prompt = "Muxpad"
-	}
-	listHeight := max(totalRows-Chrome, MinList)
-	top := []string{Bold + "  " + prompt + Reset, "", "  " + Bold + "❯" + Reset + " " + m.query, ""}
+	top := m.topLines()
+	footer := m.footerLines(totalWidth)
+	listHeight := max(totalRows-len(top)-len(footer), MinList)
 	body := m.BodyLines(totalWidth, listHeight)
-	footer := append([]string{""}, m.detailLines(totalWidth)...)
-	footer = append(footer, "  "+Dim+strings.Repeat("─", max(totalWidth-2, 0))+Reset, "  "+Dim+m.hint()+Reset)
 	pad := max(totalRows-len(top)-len(body)-len(footer), 0)
 	lines := append([]string{}, top...)
 	lines = append(lines, body...)
@@ -352,6 +394,24 @@ func (m *model) Render(totalWidth, totalRows int, prompt string) []string {
 	}
 	lines = append(lines, footer...)
 	return lines
+}
+
+// topLines renders the filter input. The overlay pane already draws a titled
+// border, so there is no in-palette heading (which used to duplicate it).
+func (m *model) topLines() []string {
+	input := "  " + Bold + "❯" + Reset + " "
+	if m.query == "" {
+		input += Dim + "Type to filter" + Reset
+	} else {
+		input += m.query
+	}
+	return []string{"", input, ""}
+}
+
+// footerLines renders the detail box followed by the key hint.
+func (m *model) footerLines(totalWidth int) []string {
+	lines := append([]string{""}, m.detailBox(totalWidth)...)
+	return append(lines, "", "  "+Dim+m.hint()+Reset)
 }
 
 func (m *model) BodyLines(totalWidth, listHeight int) []string {
@@ -382,7 +442,7 @@ func (m *model) BodyLines(totalWidth, listHeight int) []string {
 		if i < len(launch) {
 			right = launch[i]
 		}
-		out = append(out, left+Dim+"│"+Reset+right)
+		out = append(out, left+Muted+"│"+Reset+right)
 	}
 	return out
 }
@@ -423,24 +483,55 @@ func (m *model) clampOffset(height int) {
 	m.offset = clamp(m.offset, 0, max(len(m.rows)-1, 0))
 }
 
-func (m *model) detailLines(width int) []string {
+// detailBox renders a rounded, accent-bordered box previewing the current item.
+// The box title is the verb (Run / Open / Focus); the body shows the command
+// (for tasks/scripts) and the directory, each with an icon.
+func (m *model) detailBox(totalWidth int) []string {
 	item, ok := m.current()
 	if !ok {
-		return []string{"", "", ""}
+		return nil
 	}
-	heading := "  " + Dim + "This will " + strings.ToLower(m.verb()) + ":" + Reset
-	command := "  " + Dim + "$ " + Truncate(item.Command, width-4) + Reset
-	directory := ""
+	boxWidth := max(totalWidth-2, 12)
+	inner := boxWidth - 4
+	var content []string
+	if item.Command != "" && item.Command != item.Directory {
+		content = append(content, boxContent(Accent+"▶"+Reset+" "+Truncate(item.Command, inner-2), inner))
+	}
 	if item.Directory != "" {
-		directory = "  " + Dim + "in " + Truncate(Abbreviate(item.Directory), width-5) + Reset
+		content = append(content, boxContent("📁 "+Dim+Truncate(Abbreviate(item.Directory), inner-3)+Reset, inner))
 	}
-	return []string{heading, command, directory}
+	if item.State != "" {
+		color := StateColor[item.StateKind]
+		if color == "" {
+			color = Dim
+		}
+		content = append(content, boxContent(color+stateGlyph(item.StateKind)+" "+Truncate(item.State, inner-2)+Reset, inner))
+	}
+	if len(content) == 0 {
+		content = append(content, boxContent("", inner))
+	}
+	title := " " + m.verb() + " "
+	dashes := max(boxWidth-3-visibleWidth(title), 0)
+	top := "  " + Accent + "╭─" + Bold + title + Reset + Accent + strings.Repeat("─", dashes) + "╮" + Reset
+	bottom := "  " + Accent + "╰" + strings.Repeat("─", max(boxWidth-2, 0)) + "╯" + Reset
+	lines := []string{top}
+	for _, c := range content {
+		lines = append(lines, "  "+Accent+"│"+Reset+" "+c+" "+Accent+"│"+Reset)
+	}
+	return append(lines, bottom)
 }
 
 func (m *model) verb() string {
 	item, ok := m.current()
-	if ok && (item.StateKind == StateRunning || item.StateKind == StateFinished) {
+	if !ok {
+		return "Run"
+	}
+	if item.StateKind == StateRunning || item.StateKind == StateFinished {
 		return "Focus"
+	}
+	// Project entries carry a directory but no command; they open a workspace.
+	if item.Command == "" && item.Directory != "" {
+		return "Open"
 	}
 	return "Run"
 }
@@ -459,7 +550,12 @@ func (m *model) hint() string {
 		}
 		return switcher + strings.Join(actions, " · ") + " · esc close"
 	}
-	actions := []string{"enter " + strings.ToLower(m.verb()), "tab actions"}
+	actions := []string{"enter " + strings.ToLower(m.verb())}
+	// Placement actions apply to launchable items (which carry a command), not
+	// to project entries.
+	if ok && current.Command != "" {
+		actions = append(actions, "tab actions")
+	}
 	if restartable {
 		actions = append(actions, "ctrl-r restart")
 	}
