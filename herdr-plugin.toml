@@ -32,6 +32,6 @@ command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" open-palette
 [[panes]]
 id = "palette"
 title = "Muxpad"
-description = "Fuzzy-select a declared project task."
+description = "Fuzzy-select a declared project task or discovered package script."
 placement = "overlay"
 command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" palette']

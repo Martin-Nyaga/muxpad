@@ -514,7 +514,11 @@ func (a *Application) HandleSelection(session string, selection palette.Selectio
 		if (action == "ctrl-r" || action == "restart") && hasPane {
 			return a.Tmux.Restart(pane, definition)
 		}
-		return a.launchScript(session, definition, placement)
+		root := a.Tmux.WorkspaceRoot(session)
+		if hasProject {
+			root = project.Root
+		}
+		return a.launchScript(session, definition, root, placement)
 	case "agent":
 		if action == "ctrl-r" || action == "restart" {
 			return fmt.Errorf("restart applies only to tasks and package scripts")
@@ -575,7 +579,7 @@ func (a *Application) discoveredScripts(session string, project config.Project, 
 	return out
 }
 
-func (a *Application) launchScript(session string, definition config.Definition, placement config.Placement) error {
+func (a *Application) launchScript(session string, definition config.Definition, root string, placement config.Placement) error {
 	panes, err := a.Tmux.Panes(session)
 	if err != nil {
 		return err
@@ -585,7 +589,6 @@ func (a *Application) launchScript(session string, definition config.Definition,
 			return a.Tmux.Focus(pane)
 		}
 	}
-	root := a.Tmux.WorkspaceRoot(session)
 	if placement == "" {
 		placement = definition.Placement
 	}

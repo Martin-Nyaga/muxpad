@@ -228,6 +228,64 @@ func TestDeclaredTaskMenuFocusesExistingTaskSelection(t *testing.T) {
 	}
 }
 
+func TestDeclaredTaskMenuIncludesDiscoveredScriptsBelowTasks(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{inside: true, root: project}
+	app := testApp(t, project, tmuxFake)
+	app.Discovery = fakeDiscovery{
+		{ID: "duplicate", Name: "duplicate", Description: "duplicate", Command: "sleep 30", Placement: config.PlacementWindow, ExitMode: config.ExitKeepOnError, Enabled: true, Executable: "sleep"},
+		{ID: "dev", Name: "dev", Description: "vite", Command: "npm run dev", Placement: config.PlacementWindow, ExitMode: config.ExitKeepOnError, Enabled: true, Executable: "npm"},
+	}
+	pal := &recordingPalette{selectResult: palette.Selection{Action: "enter", Token: "script:dev"}, selectOK: true}
+	app.Palette = pal
+
+	if err := app.DeclaredTaskMenu(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(pal.sectionOrder, []string{"Tasks", "Discovered scripts"}) {
+		t.Fatalf("section order = %#v", pal.sectionOrder)
+	}
+	if findItem(pal.items, "task:server", "Tasks").Token == "" {
+		t.Fatalf("task missing from palette: %#v", pal.items)
+	}
+	if findItem(pal.items, "script:dev", "Discovered scripts").Token == "" {
+		t.Fatalf("discovered script missing from palette: %#v", pal.items)
+	}
+	if findItem(pal.items, "script:duplicate", "Discovered scripts").Token != "" {
+		t.Fatalf("duplicate discovered script should be filtered: %#v", pal.items)
+	}
+	launch := tmuxFake.calls[0].(backend.LaunchSpec)
+	if launch.Kind != "script" || launch.Definition.ID != "dev" || launch.Root != project || launch.Target != "%9" {
+		t.Fatalf("launch = %#v", launch)
+	}
+}
+
+func TestDeclaredTaskMenuFocusesExistingDiscoveredScriptSelection(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{
+		inside: true,
+		root:   project,
+		panes: []backend.Pane{{
+			ID:           "w1:p2",
+			Kind:         "script",
+			DefinitionID: "dev",
+			Name:         "dev",
+		}},
+	}
+	app := testApp(t, project, tmuxFake)
+	app.Discovery = fakeDiscovery{
+		{ID: "dev", Name: "dev", Description: "vite", Command: "npm run dev", Placement: config.PlacementWindow, ExitMode: config.ExitKeepOnError, Enabled: true, Executable: "npm"},
+	}
+	app.Palette = stubPalette{selectResult: palette.Selection{Action: "enter", Token: "script:dev"}, selectOK: true}
+
+	if err := app.DeclaredTaskMenu(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tmuxFake.calls, []any{[]any{"focus", "w1:p2"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+}
+
 func testApp(t *testing.T, project string, tmuxFake *fakeTmux) *Application {
 	t.Helper()
 	cfg := &config.Config{Projects: []config.Project{{
@@ -241,6 +299,23 @@ func testApp(t *testing.T, project string, tmuxFake *fakeTmux) *Application {
 		}},
 	}}, Agents: []config.Definition{{ID: "codex", Name: "codex", Description: "openai coding agent", Command: "sleep 30", Executable: "sleep", Placement: config.PlacementWindow, ExitMode: config.ExitClose, Enabled: true}}}
 	return &Application{Config: cfg, Tmux: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{}, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
+}
+
+type recordingPalette struct {
+	items        []palette.Item
+	sectionOrder []string
+	selectResult palette.Selection
+	selectOK     bool
+}
+
+func (r *recordingPalette) Select(items []palette.Item, sectionOrder []string) (palette.Selection, bool, error) {
+	r.items = append([]palette.Item{}, items...)
+	r.sectionOrder = append([]string{}, sectionOrder...)
+	return r.selectResult, r.selectOK, nil
+}
+
+func (r *recordingPalette) Choose([]palette.Option, string) (string, bool, error) {
+	return "", false, nil
 }
 
 func findItem(items []palette.Item, token, section string) palette.Item {
