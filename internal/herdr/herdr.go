@@ -168,19 +168,34 @@ func (c *Client) Panes(workspace string) ([]backend.Pane, error) {
 }
 
 func (c *Client) Launch(spec backend.LaunchSpec) (string, error) {
-	pane, err := c.CreateTab(backend.CreateTabSpec{
-		Workspace: spec.Workspace,
-		Label:     spec.Name,
-		Directory: resolveDirectory(spec.Root, spec.Definition),
-		Focus:     true,
-	})
+	directory := resolveDirectory(spec.Root, spec.Definition)
+	pane, err := c.createPlacedPane(spec, directory)
 	if err != nil {
 		return "", err
 	}
-	if err := c.RunInPane(pane, spec.Definition.Command); err != nil {
+	command := "exec " + backend.WrappedCommand(spec.Definition.Command, spec.Definition.ExitMode, backend.CommandWrapOptions{})
+	if err := c.RunInPane(pane, command); err != nil {
 		return "", err
 	}
 	return pane.ID, nil
+}
+
+func (c *Client) createPlacedPane(spec backend.LaunchSpec, directory string) (backend.Pane, error) {
+	if spec.Placement == "" || spec.Placement == config.PlacementWindow {
+		return c.CreateTab(backend.CreateTabSpec{
+			Workspace: spec.Workspace,
+			Label:     spec.Name,
+			Directory: directory,
+			Focus:     true,
+		})
+	}
+	return c.SplitPane(backend.SplitPaneSpec{
+		Workspace: spec.Workspace,
+		Target:    spec.Target,
+		Direction: spec.Placement,
+		Directory: directory,
+		Focus:     true,
+	})
 }
 
 func (c *Client) Focus(pane backend.Pane) error {
@@ -259,6 +274,39 @@ func (c *Client) CreateTab(spec backend.CreateTabSpec) (backend.Pane, error) {
 		return backend.Pane{ID: id}, nil
 	}
 	return backend.Pane{}, errors.New("herdr tab create did not report a pane id")
+}
+
+func (c *Client) SplitPane(spec backend.SplitPaneSpec) (backend.Pane, error) {
+	args := []string{"pane", "split"}
+	if spec.Target != "" {
+		args = append(args, "--pane", spec.Target)
+	} else {
+		args = append(args, "--current")
+	}
+	args = append(args, "--direction", splitDirection(spec.Direction))
+	if spec.Directory != "" {
+		args = append(args, "--cwd", spec.Directory)
+	}
+	if spec.Focus {
+		args = append(args, "--focus")
+	} else {
+		args = append(args, "--no-focus")
+	}
+	out, err := c.capture(args...)
+	if err != nil {
+		return backend.Pane{}, err
+	}
+	if id := paneID(out); id != "" {
+		return backend.Pane{ID: id}, nil
+	}
+	out, err = c.capture("pane", "current", "--current")
+	if err != nil {
+		return backend.Pane{}, err
+	}
+	if id := paneID(out); id != "" {
+		return backend.Pane{ID: id}, nil
+	}
+	return backend.Pane{}, errors.New("herdr pane split did not report a pane id")
 }
 
 func (c *Client) RunInPane(pane backend.Pane, command string) error {
@@ -402,6 +450,13 @@ func resolveDirectory(root string, definition config.Definition) string {
 		return root
 	}
 	return filepath.Join(root, definition.Directory)
+}
+
+func splitDirection(placement config.Placement) string {
+	if placement == config.PlacementHorizontal {
+		return "right"
+	}
+	return "down"
 }
 
 func envDefault(key, fallback string) string {

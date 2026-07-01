@@ -41,6 +41,14 @@ type CreateTabSpec struct {
 	Focus     bool
 }
 
+type SplitPaneSpec struct {
+	Workspace string
+	Target    string
+	Direction config.Placement
+	Directory string
+	Focus     bool
+}
+
 type Backend interface {
 	Inside() bool
 	CurrentWorkspace() (string, error)
@@ -61,5 +69,6 @@ type Backend interface {
 	KillWorkspace(workspace string) error
 
 	CreateTab(CreateTabSpec) (Pane, error)
+	SplitPane(SplitPaneSpec) (Pane, error)
 	RunInPane(Pane, string) error
 }

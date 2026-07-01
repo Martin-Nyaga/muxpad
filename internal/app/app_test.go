@@ -68,6 +68,7 @@ func (f *fakeTmux) PopupMenu(string) error                                { retu
 func (f *fakeTmux) KillSession(string) error                              { return nil }
 func (f *fakeTmux) KillWorkspace(string) error                            { return nil }
 func (f *fakeTmux) CreateTab(backend.CreateTabSpec) (backend.Pane, error) { return backend.Pane{}, nil }
+func (f *fakeTmux) SplitPane(backend.SplitPaneSpec) (backend.Pane, error) { return backend.Pane{}, nil }
 func (f *fakeTmux) RunInPane(backend.Pane, string) error                  { return nil }
 
 type fakeAgentDiscovery map[string]string

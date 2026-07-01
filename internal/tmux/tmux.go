@@ -256,6 +256,34 @@ func (c *Client) RunInPane(pane backend.Pane, command string) error {
 	return c.runBang("send-keys", "-t", pane.ID, command, "Enter")
 }
 
+func (c *Client) SplitPane(spec backend.SplitPaneSpec) (backend.Pane, error) {
+	direction := config.PlacementVertical
+	if spec.Direction != "" {
+		direction = spec.Direction
+	}
+	definition := config.Definition{
+		ID:          "shell",
+		Name:        "shell",
+		Description: "shell",
+		Command:     "exec ${SHELL:-/bin/sh}",
+		Placement:   direction,
+		ExitMode:    config.ExitKeep,
+	}
+	id, err := c.Launch(backend.LaunchSpec{
+		Workspace:  spec.Workspace,
+		Definition: definition,
+		Kind:       "shell",
+		Name:       "shell",
+		Root:       spec.Directory,
+		Placement:  direction,
+		Target:     spec.Target,
+	})
+	if err != nil {
+		return backend.Pane{}, err
+	}
+	return backend.Pane{ID: id}, nil
+}
+
 func (c *Client) Focus(pane Pane) error {
 	if err := c.runBang("select-window", "-t", pane.Window); err != nil {
 		return err
@@ -318,33 +346,15 @@ func (c *Client) KillWorkspace(workspace string) error {
 }
 
 func (c *Client) WrappedCommand(command string, exitMode config.ExitMode) string {
-	if exitMode == config.ExitClose {
-		return "sh -c " + shellwords.Escape("exec "+command)
-	}
 	parts := make([]string, 0, len(c.Prefix))
 	for _, part := range c.Prefix {
 		parts = append(parts, shellwords.Escape(part))
 	}
 	tmux := strings.Join(parts, " ")
-	drop := `muxpad_seed_history() {
-  [ -n "$muxpad_command" ] || return 0
-  case "${SHELL##*/}" in
-    zsh) printf ': %s:0;%s\n' "$(date +%s 2>/dev/null || echo 0)" "$muxpad_command" >> "${HISTFILE:-$HOME/.zsh_history}" 2>/dev/null ;;
-    bash) printf '%s\n' "$muxpad_command" >> "${HISTFILE:-$HOME/.bash_history}" 2>/dev/null ;;
-  esac
-}
-muxpad_drop() {
-  ` + tmux + ` set-option -p -t "$TMUX_PANE" @muxpad_finished 1
-  muxpad_seed_history
-  exec "${SHELL:-/bin/sh}"
-}
-trap 'status=$?; muxpad_drop' INT TERM`
-	tail := "muxpad_drop"
-	if exitMode == config.ExitKeepOnError {
-		tail = `if [ $status -eq 0 ]; then ` + tmux + ` kill-pane -t "$TMUX_PANE"; else muxpad_drop; fi`
-	}
-	inner := "muxpad_command=" + shellwords.Escape(command) + "\n" + drop + "\n( " + command + "\n); status=$?\n" + tail
-	return "sh -c " + shellwords.Escape(inner)
+	return backend.WrappedCommand(command, exitMode, backend.CommandWrapOptions{
+		CloseCommand:  tmux + ` kill-pane -t "$TMUX_PANE"`,
+		FinishCommand: tmux + ` set-option -p -t "$TMUX_PANE" @muxpad_finished 1`,
+	})
 }
 
 func (c *Client) syncPath(session string) error {
