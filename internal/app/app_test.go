@@ -193,13 +193,14 @@ func TestDeclaredTaskMenuResolvesProjectFromWorkspaceRootAndLaunchesSelection(t 
 	project := t.TempDir()
 	tmuxFake := &fakeTmux{inside: true, root: project}
 	app := testApp(t, project, tmuxFake)
+	app.Config.Projects[0].Tasks[0].Placement = config.PlacementVertical
 	app.Palette = stubPalette{selectResult: palette.Selection{Action: "enter", Token: "task:server"}, selectOK: true}
 
 	if err := app.DeclaredTaskMenu(); err != nil {
 		t.Fatal(err)
 	}
 	launch := tmuxFake.calls[0].(backend.LaunchSpec)
-	if launch.Workspace != "original" || launch.Root != project || launch.Definition.ID != "server" || launch.Placement != config.PlacementWindow {
+	if launch.Workspace != "original" || launch.Root != project || launch.Definition.ID != "server" || launch.Placement != config.PlacementVertical || launch.Target != "%9" {
 		t.Fatalf("launch = %#v", launch)
 	}
 }

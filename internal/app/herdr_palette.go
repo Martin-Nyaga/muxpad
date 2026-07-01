@@ -43,7 +43,8 @@ func (a *Application) DeclaredTaskMenu() error {
 		Kind:       "task",
 		Name:       task.Name,
 		Root:       project.Root,
-		Placement:  config.PlacementWindow,
+		Placement:  task.Placement,
+		Target:     a.launchTarget(workspace),
 	})
 	return err
 }
