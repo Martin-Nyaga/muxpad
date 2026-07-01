@@ -9,39 +9,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Martin-Nyaga/muxpad/internal/backend"
 	"github.com/Martin-Nyaga/muxpad/internal/config"
 	"github.com/Martin-Nyaga/muxpad/internal/shellwords"
 )
 
-type Pane struct {
-	ID             string
-	Session        string
-	Window         string
-	WindowIndex    string
-	Kind           string
-	DefinitionID   string
-	Name           string
-	Dead           bool
-	Finished       bool
-	CurrentCommand string
-	Title          string
-	PID            string
-	CurrentPath    string
-}
+type Pane = backend.Pane
 
-func (p Pane) Done() bool {
-	return p.Dead || p.Finished
-}
-
-type LaunchSpec struct {
-	Session    string
-	Definition config.Definition
-	Kind       string
-	Name       string
-	Root       string
-	Placement  config.Placement
-	Target     string
-}
+type LaunchSpec = backend.LaunchSpec
 
 type Result struct {
 	Stdout string
@@ -79,6 +54,10 @@ func (c *Client) CurrentSession() (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+func (c *Client) CurrentWorkspace() (string, error) {
+	return c.CurrentSession()
+}
+
 func (c *Client) CurrentPane() (string, error) {
 	out, err := c.capture("display-message", "-p", "#{pane_id}")
 	return strings.TrimSpace(out), err
@@ -89,7 +68,15 @@ func (c *Client) SessionExists(name string) bool {
 	return result.OK
 }
 
+func (c *Client) WorkspaceExists(name string) bool {
+	return c.SessionExists(name)
+}
+
 func (c *Client) Sessions() []string {
+	return c.Workspaces()
+}
+
+func (c *Client) Workspaces() []string {
 	out, err := c.captureAllow("list-sessions", "-F", "#{session_name}")
 	if err != nil {
 		return nil
@@ -118,6 +105,10 @@ func (c *Client) CreateSession(name, root, projectID string) (string, error) {
 	return pane, nil
 }
 
+func (c *Client) CreateWorkspace(name, root, projectID string) (string, error) {
+	return c.CreateSession(name, root, projectID)
+}
+
 func (c *Client) ProjectContext(session string) string {
 	out, _ := c.captureAllow("show-options", "-qv", "-t", session, "@muxpad_project")
 	return strings.TrimSpace(out)
@@ -136,6 +127,10 @@ func (c *Client) SessionRoot(session string) string {
 	return strings.TrimSpace(out)
 }
 
+func (c *Client) WorkspaceRoot(workspace string) string {
+	return c.SessionRoot(workspace)
+}
+
 func (c *Client) Panes(session string) ([]Pane, error) {
 	out, err := c.capture("list-panes", "-s", "-t", session, "-F", format)
 	if err != nil {
@@ -149,7 +144,7 @@ func (c *Client) Panes(session string) ([]Pane, error) {
 		}
 		panes = append(panes, Pane{
 			ID:             fields[0],
-			Session:        fields[1],
+			Workspace:      fields[1],
 			Window:         fields[2],
 			WindowIndex:    fields[3],
 			Kind:           fields[4],
@@ -167,7 +162,7 @@ func (c *Client) Panes(session string) ([]Pane, error) {
 }
 
 func (c *Client) Launch(spec LaunchSpec) (string, error) {
-	if err := c.syncPath(spec.Session); err != nil {
+	if err := c.syncPath(spec.Workspace); err != nil {
 		return "", err
 	}
 	directory := spec.Root
@@ -178,7 +173,7 @@ func (c *Client) Launch(spec LaunchSpec) (string, error) {
 	placeholder := "sh -c 'while :; do sleep 60; done'"
 	var args []string
 	if spec.Placement == config.PlacementWindow {
-		target := fmt.Sprintf("%s:%d", spec.Session, c.nextWindowIndex(spec.Session))
+		target := fmt.Sprintf("%s:%d", spec.Workspace, c.nextWindowIndex(spec.Workspace))
 		args = []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", target, "-n", spec.Name, "-c", directory, placeholder}
 	} else {
 		flag := "-v"
@@ -187,7 +182,7 @@ func (c *Client) Launch(spec LaunchSpec) (string, error) {
 		}
 		target := spec.Target
 		if target == "" {
-			target = spec.Session + ":shell"
+			target = spec.Workspace + ":shell"
 		}
 		args = []string{"split-window", "-d", "-P", "-F", "#{pane_id}", flag, "-t", target, "-c", directory, placeholder}
 	}
@@ -219,7 +214,7 @@ func (c *Client) Launch(spec LaunchSpec) (string, error) {
 	if err := c.runBang("select-pane", "-t", pane, "-T", spec.Name); err != nil {
 		return "", err
 	}
-	if panes, err := c.Panes(spec.Session); err == nil {
+	if panes, err := c.Panes(spec.Workspace); err == nil {
 		for _, item := range panes {
 			if item.ID == pane {
 				_ = c.Focus(item)
@@ -230,6 +225,35 @@ func (c *Client) Launch(spec LaunchSpec) (string, error) {
 		return "", err
 	}
 	return pane, nil
+}
+
+func (c *Client) CreateTab(spec backend.CreateTabSpec) (backend.Pane, error) {
+	id, err := c.Launch(backend.LaunchSpec{
+		Workspace: spec.Workspace,
+		Definition: config.Definition{
+			ID:          spec.Label,
+			Name:        spec.Label,
+			Description: spec.Label,
+			Command:     "exec ${SHELL:-/bin/sh}",
+			Placement:   config.PlacementWindow,
+			ExitMode:    config.ExitKeep,
+		},
+		Kind:      "shell",
+		Name:      spec.Label,
+		Root:      spec.Directory,
+		Placement: config.PlacementWindow,
+	})
+	if err != nil {
+		return backend.Pane{}, err
+	}
+	return backend.Pane{ID: id}, nil
+}
+
+func (c *Client) RunInPane(pane backend.Pane, command string) error {
+	if pane.ID == "" {
+		return fmt.Errorf("pane id is required")
+	}
+	return c.runBang("send-keys", "-t", pane.ID, command, "Enter")
 }
 
 func (c *Client) Focus(pane Pane) error {
@@ -287,6 +311,10 @@ func (c *Client) PopupMenu(program string) error {
 
 func (c *Client) KillSession(session string) error {
 	return c.runBang("kill-session", "-t", session)
+}
+
+func (c *Client) KillWorkspace(workspace string) error {
+	return c.KillSession(workspace)
 }
 
 func (c *Client) WrappedCommand(command string, exitMode config.ExitMode) string {

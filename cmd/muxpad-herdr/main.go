@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Martin-Nyaga/muxpad/internal/backend"
+	"github.com/Martin-Nyaga/muxpad/internal/app"
+	"github.com/Martin-Nyaga/muxpad/internal/config"
 	"github.com/Martin-Nyaga/muxpad/internal/herdr"
 )
-
-const hardcodedCommand = `printf 'muxpad herdr skeleton running in %s\n' "${SHELL:-/bin/sh}"; while :; do sleep 3600; done`
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr))
@@ -20,14 +19,20 @@ func run(args []string, stderr *os.File) int {
 		command = args[0]
 	}
 	switch command {
-	case "", "launch-hardcoded":
-		if err := launchHardcoded(herdr.New()); err != nil {
+	case "open-palette":
+		if err := herdr.New().OpenPalette(); err != nil {
+			fmt.Fprintf(stderr, "muxpad-herdr: %v\n", err)
+			return 1
+		}
+		return 0
+	case "", "palette":
+		if err := runPalette(); err != nil {
 			fmt.Fprintf(stderr, "muxpad-herdr: %v\n", err)
 			return 1
 		}
 		return 0
 	case "help", "--help", "-h":
-		fmt.Fprint(stderr, "Usage: muxpad-herdr launch-hardcoded\n")
+		fmt.Fprint(stderr, "Usage: muxpad-herdr open-palette|palette\n")
 		return 0
 	default:
 		fmt.Fprintf(stderr, "muxpad-herdr: unknown command: %s\n", command)
@@ -35,14 +40,10 @@ func run(args []string, stderr *os.File) int {
 	}
 }
 
-func launchHardcoded(client backend.Backend) error {
-	pane, err := client.CreateTab(backend.CreateTabSpec{
-		Label:     "muxpad skeleton",
-		Directory: os.Getenv("PWD"),
-		Focus:     true,
-	})
+func runPalette() error {
+	cfg, err := config.LoadHerdr()
 	if err != nil {
 		return err
 	}
-	return client.RunInPane(pane, hardcodedCommand)
+	return app.New(cfg, herdr.New()).DeclaredTaskMenu()
 }

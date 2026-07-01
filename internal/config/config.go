@@ -7,13 +7,16 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/Martin-Nyaga/muxpad/internal/shellwords"
 	"gopkg.in/yaml.v3"
 )
 
 const DefaultPath = "~/.config/muxpad/config.yml"
+const HerdrConfigFile = "config.toml"
 
 type Placement string
 
@@ -111,6 +114,38 @@ func LoadPath(path string) (*Config, error) {
 	return &Config{Projects: projects, Agents: agents}, nil
 }
 
+func LoadHerdr() (*Config, error) {
+	dir := os.Getenv("HERDR_PLUGIN_CONFIG_DIR")
+	if dir == "" {
+		return &Config{}, nil
+	}
+	return LoadHerdrPath(filepath.Join(dir, HerdrConfigFile))
+}
+
+func LoadHerdrPath(path string) (*Config, error) {
+	expanded := canonicalPath(path)
+	data, err := os.ReadFile(expanded)
+	if errors.Is(err, os.ErrNotExist) {
+		return &Config{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return &Config{}, nil
+	}
+	var raw herdrConfig
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("invalid config %s: %w", path, err)
+	}
+	orders := tomlOrder(data)
+	projects, err := raw.projects(orders, path)
+	if err != nil {
+		return nil, err
+	}
+	return &Config{Projects: projects}, nil
+}
+
 func (c *Config) Project(id string) (Project, bool) {
 	if c == nil {
 		return Project{}, false
@@ -152,6 +187,172 @@ func (c *Config) ProjectFor(path string) (Project, bool) {
 type entry struct {
 	id   string
 	node *yaml.Node
+}
+
+type herdrConfig struct {
+	Projects map[string]herdrProject `toml:"projects"`
+}
+
+type herdrProject struct {
+	Root         string               `toml:"root"`
+	Name         string               `toml:"name"`
+	DefaultTasks []string             `toml:"default_tasks"`
+	Discovery    herdrDiscovery       `toml:"discovery"`
+	Tasks        map[string]herdrTask `toml:"tasks"`
+}
+
+type herdrDiscovery struct {
+	Exclude []string `toml:"exclude"`
+}
+
+type herdrTask struct {
+	Command     string    `toml:"command"`
+	Name        string    `toml:"name"`
+	Description string    `toml:"description"`
+	Directory   string    `toml:"directory"`
+	Placement   Placement `toml:"placement"`
+	ExitMode    ExitMode  `toml:"exit_mode"`
+}
+
+type tomlOrders struct {
+	projects map[string]int
+	tasks    map[string]map[string]int
+}
+
+func (raw herdrConfig) projects(orders tomlOrders, path string) ([]Project, error) {
+	if len(raw.Projects) == 0 {
+		return nil, nil
+	}
+	ids := orderedKeys(raw.Projects, orders.projects)
+	projects := make([]Project, 0, len(ids))
+	for _, id := range ids {
+		if !idPattern.MatchString(id) {
+			return nil, fmt.Errorf("invalid project identifier: %q", id)
+		}
+		item := raw.Projects[id]
+		if strings.TrimSpace(item.Root) == "" {
+			return nil, fmt.Errorf("project %q requires root", id)
+		}
+		tasks, err := item.tasks(id, orders.tasks[id])
+		if err != nil {
+			return nil, err
+		}
+		name := item.Name
+		if name == "" {
+			name = id
+		}
+		projects = append(projects, Project{
+			ID:               id,
+			Name:             name,
+			Root:             canonicalPath(item.Root),
+			Tasks:            tasks,
+			DefaultTasks:     append([]string{}, item.DefaultTasks...),
+			DiscoveryExclude: append([]string{}, item.Discovery.Exclude...),
+		})
+	}
+	return projects, nil
+}
+
+func (project herdrProject) tasks(projectID string, order map[string]int) ([]Definition, error) {
+	if len(project.Tasks) == 0 {
+		return nil, nil
+	}
+	ids := orderedKeys(project.Tasks, order)
+	tasks := make([]Definition, 0, len(ids))
+	for _, id := range ids {
+		if !idPattern.MatchString(id) {
+			return nil, fmt.Errorf("invalid task identifier: %q", id)
+		}
+		task := project.Tasks[id]
+		if strings.TrimSpace(task.Command) == "" {
+			return nil, fmt.Errorf("task %s/%s requires command", projectID, id)
+		}
+		if strings.TrimSpace(task.Name) == "" {
+			return nil, fmt.Errorf("task %s/%s requires a display name", projectID, id)
+		}
+		if strings.TrimSpace(task.Description) == "" {
+			return nil, fmt.Errorf("task %s/%s requires a description", projectID, id)
+		}
+		if task.Directory != "" && filepath.IsAbs(task.Directory) {
+			return nil, fmt.Errorf("task %s/%s directory must be relative", projectID, id)
+		}
+		placement := task.Placement
+		if placement == "" {
+			placement = PlacementWindow
+		}
+		if !validPlacement(placement) {
+			return nil, fmt.Errorf("invalid placement %q for %s", placement, id)
+		}
+		exitMode := task.ExitMode
+		if exitMode == "" {
+			exitMode = ExitKeepOnError
+		}
+		if !validExitMode(exitMode) {
+			return nil, fmt.Errorf("invalid exit mode %q for %s", exitMode, id)
+		}
+		parts, _ := shellwords.Split(task.Command)
+		executable := ""
+		if len(parts) > 0 {
+			executable = parts[0]
+		}
+		tasks = append(tasks, Definition{
+			ID:          id,
+			Name:        task.Name,
+			Description: task.Description,
+			Command:     task.Command,
+			Directory:   task.Directory,
+			Placement:   placement,
+			ExitMode:    exitMode,
+			Enabled:     true,
+			Executable:  executable,
+		})
+	}
+	return tasks, nil
+}
+
+func orderedKeys[V any](items map[string]V, order map[string]int) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		left, hasLeft := order[keys[i]]
+		right, hasRight := order[keys[j]]
+		if hasLeft && hasRight && left != right {
+			return left < right
+		}
+		if hasLeft != hasRight {
+			return hasLeft
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func tomlOrder(data []byte) tomlOrders {
+	orders := tomlOrders{projects: map[string]int{}, tasks: map[string]map[string]int{}}
+	projectHeader := regexp.MustCompile(`^\s*\[projects\.([A-Za-z0-9_-]+)\]\s*(?:#.*)?$`)
+	taskHeader := regexp.MustCompile(`^\s*\[projects\.([A-Za-z0-9_-]+)\.tasks\.([A-Za-z0-9_-]+)\]\s*(?:#.*)?$`)
+	for index, line := range strings.Split(string(data), "\n") {
+		if match := taskHeader.FindStringSubmatch(line); len(match) == 3 {
+			if _, ok := orders.tasks[match[1]]; !ok {
+				orders.tasks[match[1]] = map[string]int{}
+			}
+			if _, ok := orders.tasks[match[1]][match[2]]; !ok {
+				orders.tasks[match[1]][match[2]] = index
+			}
+			if _, ok := orders.projects[match[1]]; !ok {
+				orders.projects[match[1]] = index
+			}
+			continue
+		}
+		if match := projectHeader.FindStringSubmatch(line); len(match) == 2 {
+			if _, ok := orders.projects[match[1]]; !ok {
+				orders.projects[match[1]] = index
+			}
+		}
+	}
+	return orders
 }
 
 var idPattern = regexp.MustCompile(`\A[a-zA-Z0-9_-]+\z`)

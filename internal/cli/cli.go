@@ -7,6 +7,7 @@ import (
 
 	"github.com/Martin-Nyaga/muxpad/internal/app"
 	"github.com/Martin-Nyaga/muxpad/internal/config"
+	"github.com/Martin-Nyaga/muxpad/internal/tmux"
 )
 
 type Application interface {
@@ -32,16 +33,13 @@ type CLI struct {
 }
 
 func Run(args []string, output, stderr io.Writer) int {
-	application, err := app.New()
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(stderr, "muxpad: %v\n", err)
 		return 1
 	}
-	tmuxClient, ok := application.Tmux.(Tmux)
-	if !ok {
-		fmt.Fprintln(stderr, "muxpad: invalid tmux client")
-		return 1
-	}
+	tmuxClient := tmux.New()
+	application := app.New(cfg, tmuxClient)
 	return (&CLI{Args: args, Output: output, Error: stderr, App: application, Tmux: tmuxClient, Program: os.Args[0]}).Run()
 }
 

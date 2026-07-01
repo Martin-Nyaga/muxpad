@@ -8,41 +8,54 @@ import (
 	"testing"
 
 	"github.com/Martin-Nyaga/muxpad/internal/agent"
+	"github.com/Martin-Nyaga/muxpad/internal/backend"
 	"github.com/Martin-Nyaga/muxpad/internal/config"
 	"github.com/Martin-Nyaga/muxpad/internal/palette"
-	"github.com/Martin-Nyaga/muxpad/internal/tmux"
 )
 
 type fakeTmux struct {
 	inside         bool
 	existing       bool
-	panes          []tmux.Pane
+	panes          []backend.Pane
 	projectContext string
+	root           string
 	calls          []any
 }
 
-func (f *fakeTmux) Inside() bool                    { return f.inside }
-func (f *fakeTmux) CurrentSession() (string, error) { return "original", nil }
-func (f *fakeTmux) CurrentPane() (string, error)    { return "%9", nil }
-func (f *fakeTmux) SessionExists(string) bool       { return f.existing }
-func (f *fakeTmux) Sessions() []string              { return nil }
+func (f *fakeTmux) Inside() bool                      { return f.inside }
+func (f *fakeTmux) CurrentSession() (string, error)   { return "original", nil }
+func (f *fakeTmux) CurrentWorkspace() (string, error) { return "original", nil }
+func (f *fakeTmux) CurrentPane() (string, error)      { return "%9", nil }
+func (f *fakeTmux) SessionExists(string) bool         { return f.existing }
+func (f *fakeTmux) WorkspaceExists(string) bool       { return f.existing }
+func (f *fakeTmux) Sessions() []string                { return nil }
+func (f *fakeTmux) Workspaces() []string              { return nil }
 func (f *fakeTmux) CreateSession(name, root, projectID string) (string, error) {
 	f.calls = append(f.calls, []any{"create_session", name, root, projectID})
 	return "%1", nil
 }
-func (f *fakeTmux) ProjectContext(string) string      { return f.projectContext }
-func (f *fakeTmux) SessionRoot(string) string         { return "/ordinary" }
-func (f *fakeTmux) ManagedRoot(string) string         { return "" }
-func (f *fakeTmux) Panes(string) ([]tmux.Pane, error) { return f.panes, nil }
-func (f *fakeTmux) Launch(spec tmux.LaunchSpec) (string, error) {
+func (f *fakeTmux) CreateWorkspace(name, root, projectID string) (string, error) {
+	return f.CreateSession(name, root, projectID)
+}
+func (f *fakeTmux) ProjectContext(string) string { return f.projectContext }
+func (f *fakeTmux) SessionRoot(string) string {
+	if f.root != "" {
+		return f.root
+	}
+	return "/ordinary"
+}
+func (f *fakeTmux) WorkspaceRoot(string) string          { return f.SessionRoot("") }
+func (f *fakeTmux) ManagedRoot(string) string            { return "" }
+func (f *fakeTmux) Panes(string) ([]backend.Pane, error) { return f.panes, nil }
+func (f *fakeTmux) Launch(spec backend.LaunchSpec) (string, error) {
 	f.calls = append(f.calls, spec)
 	return "%10", nil
 }
-func (f *fakeTmux) Focus(p tmux.Pane) error {
+func (f *fakeTmux) Focus(p backend.Pane) error {
 	f.calls = append(f.calls, []any{"focus", p.ID})
 	return nil
 }
-func (f *fakeTmux) Restart(p tmux.Pane, d config.Definition) error {
+func (f *fakeTmux) Restart(p backend.Pane, d config.Definition) error {
 	f.calls = append(f.calls, []any{"restart", p.ID, d.ID})
 	return nil
 }
@@ -51,8 +64,11 @@ func (f *fakeTmux) Switch(session string) error {
 	f.calls = append(f.calls, []any{"switch", session})
 	return nil
 }
-func (f *fakeTmux) PopupMenu(string) error   { return nil }
-func (f *fakeTmux) KillSession(string) error { return nil }
+func (f *fakeTmux) PopupMenu(string) error                                { return nil }
+func (f *fakeTmux) KillSession(string) error                              { return nil }
+func (f *fakeTmux) KillWorkspace(string) error                            { return nil }
+func (f *fakeTmux) CreateTab(backend.CreateTabSpec) (backend.Pane, error) { return backend.Pane{}, nil }
+func (f *fakeTmux) RunInPane(backend.Pane, string) error                  { return nil }
 
 type fakeAgentDiscovery map[string]string
 
@@ -64,7 +80,7 @@ func (f fakeDiscovery) Scripts(string, []string) []config.Definition { return f 
 
 func TestDecliningInsideTmuxSwitchDoesNotCreateOrChangeTarget(t *testing.T) {
 	project := t.TempDir()
-	tmuxFake := &fakeTmux{inside: true}
+	tmuxFake := &fakeTmux{inside: true, root: project}
 	var out bytes.Buffer
 	app := testApp(t, project, tmuxFake)
 	app.Input = strings.NewReader("\n")
@@ -99,8 +115,8 @@ func TestDirectAgentInsideOrdinarySessionTargetsCurrentPane(t *testing.T) {
 	if err := app.Agent("codex", config.PlacementHorizontal, false); err != nil {
 		t.Fatal(err)
 	}
-	launch := tmuxFake.calls[0].(tmux.LaunchSpec)
-	if launch.Session != "original" || launch.Target != "%9" || launch.Placement != config.PlacementHorizontal {
+	launch := tmuxFake.calls[0].(backend.LaunchSpec)
+	if launch.Workspace != "original" || launch.Target != "%9" || launch.Placement != config.PlacementHorizontal {
 		t.Fatalf("launch = %#v", launch)
 	}
 }
@@ -114,7 +130,7 @@ func TestCodexLaunchRequestsThreadTerminalTitle(t *testing.T) {
 }
 
 func TestAgentSummaryUsesOnlyMeaningfulTitles(t *testing.T) {
-	pane := tmux.Pane{Kind: "agent", DefinitionID: "codex", Name: "codex", Title: "  Fix   flaky tests  "}
+	pane := backend.Pane{Kind: "agent", DefinitionID: "codex", Name: "codex", Title: "  Fix   flaky tests  "}
 	if got := AgentSummary(pane); got != "Fix flaky tests" {
 		t.Fatalf("summary = %q", got)
 	}
@@ -136,8 +152,8 @@ func TestAgentSummaryUsesOnlyMeaningfulTitles(t *testing.T) {
 
 func TestRunningAndFinishedTasksInPaletteItems(t *testing.T) {
 	project := t.TempDir()
-	pane := tmux.Pane{ID: "%1", Session: "work", Window: "@1", WindowIndex: "1", Kind: "task", DefinitionID: "server", Name: "Server", CurrentCommand: "sleep"}
-	tmuxFake := &fakeTmux{panes: []tmux.Pane{pane}, projectContext: "work"}
+	pane := backend.Pane{ID: "%1", Workspace: "work", Window: "@1", WindowIndex: "1", Kind: "task", DefinitionID: "server", Name: "Server", CurrentCommand: "sleep"}
+	tmuxFake := &fakeTmux{panes: []backend.Pane{pane}, projectContext: "work"}
 	app := testApp(t, project, tmuxFake)
 	items, err := app.PaletteItems("work")
 	if err != nil {
@@ -158,9 +174,9 @@ func TestRunningAndFinishedTasksInPaletteItems(t *testing.T) {
 }
 
 func TestUnmanagedDetectedAgentAppearsAsNumberedInstance(t *testing.T) {
-	managed := tmux.Pane{ID: "%1", WindowIndex: "1", Kind: "agent", DefinitionID: "codex", Name: "codex", CurrentCommand: "node", Title: "Codex", PID: "100"}
-	unmanaged := tmux.Pane{ID: "%2", WindowIndex: "2", CurrentCommand: "node", Title: "Investigate timeout", PID: "200"}
-	tmuxFake := &fakeTmux{panes: []tmux.Pane{managed, unmanaged}}
+	managed := backend.Pane{ID: "%1", WindowIndex: "1", Kind: "agent", DefinitionID: "codex", Name: "codex", CurrentCommand: "node", Title: "Codex", PID: "100"}
+	unmanaged := backend.Pane{ID: "%2", WindowIndex: "2", CurrentCommand: "node", Title: "Investigate timeout", PID: "200"}
+	tmuxFake := &fakeTmux{panes: []backend.Pane{managed, unmanaged}}
 	app := &Application{Config: &config.Config{Agents: []config.Definition{}}, Tmux: tmuxFake, Discovery: fakeDiscovery{}, AgentDiscovery: fakeAgentDiscovery{"%2": "codex"}, Input: strings.NewReader(""), Output: &bytes.Buffer{}}
 	items, err := app.PaletteItems("work")
 	if err != nil {
@@ -169,6 +185,21 @@ func TestUnmanagedDetectedAgentAppearsAsNumberedInstance(t *testing.T) {
 	item := findItem(items, "running:%2", palette.RunningSection)
 	if item.Name != "codex 2" || item.Summary != "Investigate timeout" {
 		t.Fatalf("item = %#v", item)
+	}
+}
+
+func TestDeclaredTaskMenuResolvesProjectFromWorkspaceRootAndLaunchesSelection(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{inside: true, root: project}
+	app := testApp(t, project, tmuxFake)
+	app.Palette = stubPalette{selectResult: palette.Selection{Action: "enter", Token: "task:server"}, selectOK: true}
+
+	if err := app.DeclaredTaskMenu(); err != nil {
+		t.Fatal(err)
+	}
+	launch := tmuxFake.calls[0].(backend.LaunchSpec)
+	if launch.Workspace != "original" || launch.Root != project || launch.Definition.ID != "server" || launch.Placement != config.PlacementWindow {
+		t.Fatalf("launch = %#v", launch)
 	}
 }
 
