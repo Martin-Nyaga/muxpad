@@ -8,8 +8,8 @@ min_herdr_version = "0.7.1"
 # [[keys.command]]
 # key = "prefix+down"
 # type = "plugin_action"
-# plugin = "muxpad"
-# action = "launch-hardcoded"
+# command = "muxpad.launch-hardcoded"
+# description = "Muxpad: Launch hardcoded task"
 
 [[actions]]
 id = "launch-hardcoded"
