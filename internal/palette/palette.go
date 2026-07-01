@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"time"
@@ -148,11 +149,7 @@ func (p *Palette) Choose(options []Option, title string) (string, bool, error) {
 		_ = term.Restore(int(p.Input.Fd()), oldState)
 		fmt.Fprint(p.Output, "\033[?25h\033[2J\033[H")
 	}()
-	reader := bufio.NewReader(p.Input)
-	fd := int(p.Input.Fd())
-	for {
-		render()
-		key := readKey(reader, fd)
+	handle := func(key string) (Selection, bool, bool) {
 		switch key {
 		case "up":
 			if cursor > 0 {
@@ -164,13 +161,19 @@ func (p *Palette) Choose(options []Option, title string) (string, bool, error) {
 			}
 		case "enter":
 			if len(options) == 0 {
-				return "", false, nil
+				return Selection{}, false, true
 			}
-			return options[cursor].Token, true, nil
+			return Selection{Token: options[cursor].Token}, true, true
 		case "escape", "cancel":
-			return "", false, nil
+			return Selection{}, false, true
 		}
+		return Selection{}, false, false
 	}
+	keys := p.readKeys()
+	resize := watchResize()
+	defer signal.Stop(resize)
+	selection, ok := runLoop(render, handle, keys, resize)
+	return selection.Token, ok, nil
 }
 
 func (p *Palette) interact(render func(), handle func(string) (Selection, bool, bool)) (Selection, bool, error) {
@@ -182,14 +185,56 @@ func (p *Palette) interact(render func(), handle func(string) (Selection, bool, 
 		_ = term.Restore(int(p.Input.Fd()), oldState)
 		fmt.Fprint(p.Output, "\033[?25h\033[2J\033[H")
 	}()
+	keys := p.readKeys()
+	resize := watchResize()
+	defer signal.Stop(resize)
+	selection, ok := runLoop(render, handle, keys, resize)
+	return selection, ok, nil
+}
+
+// readKeys pumps decoded keys onto a channel from a background reader. The
+// palette process is short-lived, so a reader parked on Stdin after the loop
+// returns is harmless.
+func (p *Palette) readKeys() <-chan string {
+	keys := make(chan string)
 	reader := bufio.NewReader(p.Input)
 	fd := int(p.Input.Fd())
+	go func() {
+		for {
+			keys <- readKey(reader, fd)
+		}
+	}()
+	return keys
+}
+
+// watchResize delivers SIGWINCH so the loop can repaint. Overlay panes (herdr
+// overlays, tmux popups) often settle their size just after the child starts;
+// without this the first paint is drawn at the wrong size and only corrected on
+// the next keypress.
+func watchResize() chan os.Signal {
+	resize := make(chan os.Signal, 1)
+	signal.Notify(resize, unix.SIGWINCH)
+	return resize
+}
+
+// runLoop renders once, then repaints on every key and on every resize, ending
+// when handle reports it is done. Splitting this out keeps the event handling
+// testable without a real terminal.
+func runLoop(render func(), handle func(string) (Selection, bool, bool), keys <-chan string, resize <-chan os.Signal) (Selection, bool) {
+	render()
 	for {
-		render()
-		key := readKey(reader, fd)
-		selection, ok, done := handle(key)
-		if done {
-			return selection, ok, nil
+		select {
+		case <-resize:
+			render()
+		case key, open := <-keys:
+			if !open {
+				return Selection{}, false
+			}
+			selection, ok, done := handle(key)
+			if done {
+				return selection, ok
+			}
+			render()
 		}
 	}
 }
