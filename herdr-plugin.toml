@@ -44,14 +44,14 @@ command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" open-project
 
 [[panes]]
 id = "palette"
-title = "Muxpad"
+title = "Task Launcher"
 description = "Fuzzy-select a declared project task or discovered package script."
 placement = "overlay"
 command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" palette']
 
 [[panes]]
 id = "project-palette"
-title = "Muxpad Projects"
+title = "Projects"
 description = "Fuzzy-select a configured project workspace."
 placement = "overlay"
 command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" project-palette']

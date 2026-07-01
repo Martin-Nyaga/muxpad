@@ -111,10 +111,11 @@ func (a *Application) projectItems() ([]palette.Item, error) {
 			Section:     "Projects",
 			Name:        project.Name,
 			Description: palette.Abbreviate(project.Root),
-			Command:     project.Root,
-			Directory:   project.Root,
-			State:       state,
-			StateKind:   stateKind,
+			// No Command: a project opens a workspace rather than running a
+			// command, so the palette shows "Open" and a folder-only preview.
+			Directory: project.Root,
+			State:     state,
+			StateKind: stateKind,
 		})
 	}
 	return items, nil
