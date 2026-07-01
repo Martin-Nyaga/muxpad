@@ -3,45 +3,50 @@
 </p>
 
 <p align="center">
-    A project-aware command palette and launcher for tmux.
+    A project-aware command palette and launcher for tmux and Herdr.
 </p>
 
 # About
 
 Muxpad puts your configured project tasks, discovered package scripts, and
-coding agents in a fuzzy-searchable menu within tmux, so you can quickly launch,
-find, and switch between them. It also runs as a plugin for
-[Herdr](https://herdr.dev) — see [Herdr plugin](#herdr-plugin) below.
+coding agents in a fuzzy-searchable menu, so you can quickly launch, find, and
+switch between them. It runs as a standalone tmux tool and as a plugin for
+[Herdr](https://herdr.dev).
 
 <p align="center">
   <img src="assets/screenshot.png" alt="The Muxpad palette" width="900">
 </p>
 
+I built Muxpad for my own workflow: managing dev servers, workers, databases,
+test watchers, and coding agents across several repositories. tmux and Herdr
+both handle these processes well, but repeatedly creating, naming, and finding
+the corresponding windows and panes gets tedious. Muxpad automates that
+bookkeeping without replacing the tools underneath.
+
 ## How it works
 
-Muxpad is deliberately a thin layer over tmux. It creates and locates ordinary
-tmux sessions, windows, and panes, so existing bindings, navigation, and session
-management continue to work unchanged.
+A key binding opens the palette for the current project. It lists your
+configured tasks and the package scripts discovered from the root `package.json`
+and workspace packages, and on the tmux path it also lists coding agents. From
+there you can launch an entry, focus one that is already running, or choose where
+it should open. A live sidebar lists running tasks so you can find and return to
+them.
 
-A key binding opens the palette for the current project, listing configured
-tasks, coding agents, and package scripts discovered from the root `package.json`
-and workspace packages. From there, you can launch an entry, focus one that is
-already running, or choose where it should open. A live sidebar lists running
-tasks and agents so you can find and return to them.
-
-I built Muxpad for my own workflow: managing dev servers, workers, databases,
-test watchers, and coding agents across multiple repositories. tmux handles
-these processes well, but in more complex projects, repeatedly creating, naming,
-and finding the corresponding windows and panes becomes tedious. Muxpad
-automates that bookkeeping without replacing tmux or the shell tools I already
-use.
+Muxpad is a thin layer over whichever multiplexer you use. On tmux it creates and
+locates ordinary sessions, windows, and panes. As a Herdr plugin it opens the
+palette and a project launcher as Herdr overlay panes and manages Herdr
+workspaces and panes. Either way, your existing bindings and navigation keep
+working unchanged.
 
 ## Requirements
 
 - Go 1.26 or newer to build from source
-- tmux 3.3 or newer
+- tmux 3.3 or newer, for the tmux path
+- Herdr 0.7.1 or newer, for the Herdr plugin
 
-## Setup
+## Install
+
+### tmux
 
 1. Copy the example configuration and edit it (see [Configuration](#configuration)):
 
@@ -66,15 +71,11 @@ use.
 
 Then:
 - `muxpad start <project>` creates the project's tmux session and launches its
-default tasks
+  default tasks
 - `prefix + b` opens the palette from anywhere inside tmux
-- Run `muxpad help` for the available commands.
+- `muxpad help` lists the available commands
 
-## Herdr plugin
-
-Muxpad also runs as a plugin for [Herdr](https://herdr.dev), exposing the same
-task palette plus a project launcher as Herdr overlay panes. This path is still
-scrappy — build the binary and link the plugin by hand.
+### Herdr
 
 1. Build the plugin binary:
 
@@ -89,9 +90,8 @@ scrappy — build the binary and link the plugin by hand.
    herdr plugin link /path/to/muxpad
    ```
 
-   Re-run `herdr plugin link` after editing `herdr-plugin.toml`; rebuild the
-   binary (step 1) after changing Go code, since Herdr runs `dist/muxpad-herdr`
-   directly.
+   Re-run `herdr plugin link` after editing `herdr-plugin.toml`, and rebuild the
+   binary after changing Go code, since Herdr runs `dist/muxpad-herdr` directly.
 
 3. Bind the actions in `~/.config/herdr/config.toml` (change the keys to any free
    ones):
@@ -100,7 +100,7 @@ scrappy — build the binary and link the plugin by hand.
    [[keys.command]]
    key = "prefix+down"
    type = "plugin_action"
-   command = "muxpad.open-palette"          # task launcher
+   command = "muxpad.open-palette"          # task palette
    description = "muxpad: open task palette"
 
    [[keys.command]]
@@ -110,53 +110,35 @@ scrappy — build the binary and link the plugin by hand.
    description = "muxpad: open project launcher"
    ```
 
-### Configuration (Herdr)
-
-The Herdr plugin reads TOML from its plugin config directory — find it with
-`herdr plugin config-dir muxpad` (typically
-`~/.config/herdr/plugins/config/muxpad/config.toml`). Projects and tasks mirror
-the YAML config below, expressed as TOML tables:
-
-```toml
-[projects.northstar]
-name = "northstar"
-root = "~/code/northstar"
-default_tasks = ["api", "web"]
-
-[projects.northstar.tasks.api]
-name = "api"
-description = "API dev server"
-command = "pnpm --filter api dev"
-directory = "apps/api"        # optional, relative to root
-placement = "vertical"        # window | vertical | horizontal
-exit_mode = "keep"            # close | keep | keep-on-error
-```
-
-The project launcher (`prefix + up`) fuzzy-selects a configured project and
-focuses its Herdr workspace, creating it if it does not exist yet. The task
-palette (`prefix + down`) launches tasks and discovered scripts into the current
-workspace. Because Herdr panes are interactive shells, launched tasks return to
-a prompt when they exit (so `keep-on-error` behaves like `keep`) and land in
-shell history for up-arrow reruns.
+Then:
+- `prefix + up` opens the project launcher, which fuzzy-selects a configured
+  project and focuses its Herdr workspace, creating it if it does not exist yet
+- `prefix + down` opens the task palette for the current workspace
 
 ## Configuration
 
-Since muxpad can autodiscover your package scripts, configuration is not
-required. However, you can add common tasks and customize Muxpad's behavior with
-a config file.
+Configuration is optional, since Muxpad can autodiscover your package scripts.
+Add a config file to register projects and common tasks, and to customize
+behavior.
 
-Muxpad reads a single YAML file at `~/.config/muxpad/config.yml`. You can also set
-`MUXPAD_CONFIG` to point at a different file, which is useful for testing a config
-without changing your real one.
+Both paths use the same model of projects and tasks. They differ only in file
+location and format:
 
-The config file has two top-level sections: `projects` and `agents`. A complete
-example lives in [`config.example.yml`](config.example.yml).
+- **tmux** reads YAML from `~/.config/muxpad/config.yml`. Set `MUXPAD_CONFIG` to
+  point at a different file, which is useful for testing a config without
+  touching your real one. The tmux config also has an `agents` section.
+- **Herdr** reads TOML from its plugin config directory. Find it with
+  `herdr plugin config-dir muxpad` (usually
+  `~/.config/herdr/plugins/config/muxpad/config.toml`).
+
+A complete YAML example lives in [`config.example.yml`](config.example.yml).
 
 ### Projects
 
 Each entry under `projects` registers a directory Muxpad knows about. The key is
-a stable identifier (letters, numbers, `-`, `_`); `muxpad start <id>` starts it,
-and running `muxpad start` from anywhere inside `root` resolves to it.
+a stable identifier (letters, numbers, `-`, `_`). On tmux, `muxpad start <id>`
+starts it, and running `muxpad start` from anywhere inside `root` resolves to it.
+On Herdr, the project launcher lists these entries.
 
 ```yaml
 projects:
@@ -177,6 +159,26 @@ projects:
         exit_mode: keep                      # optional: close | keep | keep-on-error
 ```
 
+The same project as TOML for the Herdr config:
+
+```toml
+[projects.northstar]
+name = "northstar"
+root = "~/code/northstar"
+default_tasks = ["api", "web"]
+
+[projects.northstar.discovery]
+exclude = ["@northstar/web:e2e"]
+
+[projects.northstar.tasks.api]
+name = "api"
+description = "API dev server"
+command = "pnpm --filter api dev"
+directory = "apps/api"
+placement = "window"
+exit_mode = "keep"
+```
+
 Each **task** is a command you run often, such as a dev server, test watcher,
 database tool, or editor.
 
@@ -188,27 +190,23 @@ database tool, or editor.
 - `keep-on-error`: closes on success and opens a shell on failure. This is the
   default for tasks and discovered scripts.
 
+On the Herdr path, tasks run in the pane's interactive shell. A launched task
+returns to a prompt when it exits, so `keep-on-error` behaves like `keep`, and
+the command lands in shell history so you can rerun it with the up arrow.
+
 A finished task that dropped to a shell is still tracked: it shows as `finished`
-in the palette, selecting it focuses the pane without erasing its output, and
-`Ctrl-R` restarts the command in place.
+in the palette, and selecting it focuses the pane without erasing its output. On
+tmux, `Ctrl-R` restarts the command in place.
 
 ### Agents
 
-Coding agents are built in so you don't need to repeat them in every project.
-They are automatically available in any directory.
+Coding agents appear in the tmux palette. They are built in so you don't need to
+repeat them in every project, and they are available in any directory.
 
 The defaults are **Claude Code**, **Codex**, and **OpenCode**, but you can add
-new ones.
-
-Selecting an agent always launches a fresh instance; numbered names (`codex`,
-`codex 2`, …) keep multiple instances apart. Use the `agents` section to
-override or disable one:
-
-When Claude Code or Codex publishes a thread title to the terminal, Muxpad shows
-it beneath the running instance in the sidebar. Missing titles are simply
-omitted. Interactive Claude Code and Codex processes launched directly in a
-tmux pane are detected when the palette opens, even when Muxpad did not launch
-them.
+new ones. Selecting an agent always launches a fresh instance; numbered names
+(`codex`, `codex 2`, ...) keep multiple instances apart. Use the `agents` section
+to override or disable one:
 
 ```yaml
 agents:
@@ -220,6 +218,11 @@ agents:
     disabled: true                 # hide it from the palette
 ```
 
+When Claude Code or Codex publishes a thread title to the terminal, Muxpad shows
+it beneath the running instance in the sidebar. Missing titles are simply
+omitted. Interactive Claude Code and Codex processes launched directly in a tmux
+pane are detected when the palette opens, even when Muxpad did not launch them.
+
 ### Package-script autodiscovery
 
 For any project (and ad hoc directories), Muxpad scans the root `package.json`
@@ -229,11 +232,10 @@ from your configured `TASK` entries, and will **never launch automatically**.
 
 ## Palette actions
 
-- **Enter** launches the highlighted entry in a new window, or focuses it if
-  it's already running.
-- **Tab** opens the placement chooser (new window, vertical or horizontal split,
-  restart where applicable).
-- **Ctrl-R** restarts a retained task or script in place.
+- **Enter** launches the highlighted entry, or focuses it if it's already
+  running.
+- **Tab** opens the placement chooser (new window, vertical or horizontal split).
+- **Ctrl-R** restarts a retained task or script in place (tmux only).
 
 ## Tests
 
@@ -241,10 +243,5 @@ from your configured `TASK` entries, and will **never launch automatically**.
 go test ./...
 ```
 
-The original Ruby prototype is kept temporarily under `ruby/` while the Go port
-is validated. Its parity suite can still be run from that directory:
-
-```sh
-cd ruby
-ruby -w -Ilib:test -e 'Dir["test/**/*_test.rb"].sort.each { |file| require_relative file }'
-```
+The original Ruby prototype is kept temporarily under `ruby/` (with its own
+parity suite) while the Go port is validated.
