@@ -10,7 +10,8 @@
 
 Muxpad puts your configured project tasks, discovered package scripts, and
 coding agents in a fuzzy-searchable menu within tmux, so you can quickly launch,
-find, and switch between them.
+find, and switch between them. It also runs as a plugin for
+[Herdr](https://herdr.dev) — see [Herdr plugin](#herdr-plugin) below.
 
 <p align="center">
   <img src="assets/screenshot.png" alt="The Muxpad palette" width="900">
@@ -68,6 +69,75 @@ Then:
 default tasks
 - `prefix + b` opens the palette from anywhere inside tmux
 - Run `muxpad help` for the available commands.
+
+## Herdr plugin
+
+Muxpad also runs as a plugin for [Herdr](https://herdr.dev), exposing the same
+task palette plus a project launcher as Herdr overlay panes. This path is still
+scrappy — build the binary and link the plugin by hand.
+
+1. Build the plugin binary:
+
+   ```sh
+   go build -o dist/muxpad-herdr ./cmd/muxpad-herdr
+   ```
+
+2. Link the plugin into Herdr, pointing it at this repo. Herdr reads
+   [`herdr-plugin.toml`](herdr-plugin.toml) and registers the actions and panes:
+
+   ```sh
+   herdr plugin link /path/to/muxpad
+   ```
+
+   Re-run `herdr plugin link` after editing `herdr-plugin.toml`; rebuild the
+   binary (step 1) after changing Go code, since Herdr runs `dist/muxpad-herdr`
+   directly.
+
+3. Bind the actions in `~/.config/herdr/config.toml` (change the keys to any free
+   ones):
+
+   ```toml
+   [[keys.command]]
+   key = "prefix+down"
+   type = "plugin_action"
+   command = "muxpad.open-palette"          # task launcher
+   description = "muxpad: open task palette"
+
+   [[keys.command]]
+   key = "prefix+up"
+   type = "plugin_action"
+   command = "muxpad.open-project-palette"  # project launcher
+   description = "muxpad: open project launcher"
+   ```
+
+### Configuration (Herdr)
+
+The Herdr plugin reads TOML from its plugin config directory — find it with
+`herdr plugin config-dir muxpad` (typically
+`~/.config/herdr/plugins/config/muxpad/config.toml`). Projects and tasks mirror
+the YAML config below, expressed as TOML tables:
+
+```toml
+[projects.northstar]
+name = "northstar"
+root = "~/code/northstar"
+default_tasks = ["api", "web"]
+
+[projects.northstar.tasks.api]
+name = "api"
+description = "API dev server"
+command = "pnpm --filter api dev"
+directory = "apps/api"        # optional, relative to root
+placement = "vertical"        # window | vertical | horizontal
+exit_mode = "keep"            # close | keep | keep-on-error
+```
+
+The project launcher (`prefix + up`) fuzzy-selects a configured project and
+focuses its Herdr workspace, creating it if it does not exist yet. The task
+palette (`prefix + down`) launches tasks and discovered scripts into the current
+workspace. Because Herdr panes are interactive shells, launched tasks return to
+a prompt when they exit (so `keep-on-error` behaves like `keep`) and land in
+shell history for up-arrow reruns.
 
 ## Configuration
 
