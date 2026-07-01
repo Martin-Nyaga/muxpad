@@ -16,6 +16,7 @@ import (
 type fakeTmux struct {
 	inside         bool
 	existing       bool
+	workspaces     []backend.Workspace
 	panes          []backend.Pane
 	projectContext string
 	root           string
@@ -30,6 +31,9 @@ func (f *fakeTmux) SessionExists(string) bool         { return f.existing }
 func (f *fakeTmux) WorkspaceExists(string) bool       { return f.existing }
 func (f *fakeTmux) Sessions() []string                { return nil }
 func (f *fakeTmux) Workspaces() []string              { return nil }
+func (f *fakeTmux) WorkspaceList() ([]backend.Workspace, error) {
+	return f.workspaces, nil
+}
 func (f *fakeTmux) CreateSession(name, root, projectID string) (string, error) {
 	f.calls = append(f.calls, []any{"create_session", name, root, projectID})
 	return "%1", nil
@@ -62,6 +66,10 @@ func (f *fakeTmux) Restart(p backend.Pane, d config.Definition) error {
 func (f *fakeTmux) Attach(string) error { return nil }
 func (f *fakeTmux) Switch(session string) error {
 	f.calls = append(f.calls, []any{"switch", session})
+	return nil
+}
+func (f *fakeTmux) FocusWorkspace(workspace string) error {
+	f.calls = append(f.calls, []any{"focus_workspace", workspace})
 	return nil
 }
 func (f *fakeTmux) PopupMenu(string) error                                { return nil }
@@ -282,6 +290,47 @@ func TestDeclaredTaskMenuFocusesExistingDiscoveredScriptSelection(t *testing.T) 
 		t.Fatal(err)
 	}
 	if got, want := tmuxFake.calls, []any{[]any{"focus", "w1:p2"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenProjectCreatesEmptyWorkspaceWhenMissing(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{}
+	app := testApp(t, project, tmuxFake)
+
+	if err := app.OpenProject("work"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tmuxFake.calls, []any{[]any{"create_session", "Work", project, "work"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenProjectFocusesExistingWorkspaceByRoot(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{workspaces: []backend.Workspace{{ID: "w2", Label: "renamed", Root: project}}}
+	app := testApp(t, project, tmuxFake)
+
+	if err := app.OpenProject("work"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tmuxFake.calls, []any{[]any{"focus_workspace", "w2"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestProjectLauncherMenuEnumeratesConfiguredProjectsAndFocusesSelection(t *testing.T) {
+	project := t.TempDir()
+	tmuxFake := &fakeTmux{workspaces: []backend.Workspace{{ID: "w2", Label: "Work", Root: project}}}
+	app := testApp(t, project, tmuxFake)
+	paletteFake := stubPalette{selectResult: palette.Selection{Action: "enter", Token: "project:work"}, selectOK: true}
+	app.Palette = paletteFake
+
+	if err := app.ProjectLauncherMenu(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tmuxFake.calls, []any{[]any{"focus_workspace", "w2"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("calls = %#v, want %#v", got, want)
 	}
 }

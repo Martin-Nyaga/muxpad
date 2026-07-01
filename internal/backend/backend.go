@@ -24,6 +24,12 @@ func (p Pane) Done() bool {
 	return p.Dead || p.Finished
 }
 
+type Workspace struct {
+	ID    string
+	Label string
+	Root  string
+}
+
 type LaunchSpec struct {
 	Workspace  string
 	Definition config.Definition
@@ -55,7 +61,9 @@ type Backend interface {
 	CurrentPane() (string, error)
 	WorkspaceExists(string) bool
 	Workspaces() []string
+	WorkspaceList() ([]Workspace, error)
 	CreateWorkspace(name, root, projectID string) (string, error)
+	FocusWorkspace(workspace string) error
 	ProjectContext(workspace string) string
 	WorkspaceRoot(workspace string) string
 	ManagedRoot(workspace string) string

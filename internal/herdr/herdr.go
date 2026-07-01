@@ -40,8 +40,10 @@ type responseEnvelope struct {
 }
 
 type responseResult struct {
-	Pane  paneInfo   `json:"pane"`
-	Panes []paneInfo `json:"panes"`
+	Pane       paneInfo        `json:"pane"`
+	Panes      []paneInfo      `json:"panes"`
+	Workspace  workspaceInfo   `json:"workspace"`
+	Workspaces []workspaceInfo `json:"workspaces"`
 }
 
 type paneInfo struct {
@@ -53,6 +55,12 @@ type paneInfo struct {
 	ForegroundCWD string `json:"foreground_cwd"`
 	Label         string `json:"label"`
 	Title         string `json:"title"`
+}
+
+type workspaceInfo struct {
+	WorkspaceID string `json:"workspace_id"`
+	Label       string `json:"label"`
+	Focused     bool   `json:"focused"`
 }
 
 func New() *Client {
@@ -92,14 +100,55 @@ func (c *Client) CurrentPane() (string, error) {
 }
 
 func (c *Client) WorkspaceExists(workspace string) bool {
-	return workspace != ""
+	if workspace == "" {
+		return false
+	}
+	workspaces, err := c.WorkspaceList()
+	if err != nil {
+		return false
+	}
+	for _, item := range workspaces {
+		if item.ID == workspace {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) Workspaces() []string {
-	if workspace, err := c.CurrentWorkspace(); err == nil && workspace != "" {
-		return []string{workspace}
+	workspaces, err := c.WorkspaceList()
+	if err != nil {
+		return nil
 	}
-	return nil
+	ids := make([]string, 0, len(workspaces))
+	for _, item := range workspaces {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
+func (c *Client) WorkspaceList() ([]backend.Workspace, error) {
+	out, err := c.capture("workspace", "list")
+	if err != nil {
+		return nil, err
+	}
+	var envelope responseEnvelope
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		return nil, err
+	}
+	roots, err := c.workspaceRoots()
+	if err != nil {
+		return nil, err
+	}
+	workspaces := make([]backend.Workspace, 0, len(envelope.Result.Workspaces))
+	for _, item := range envelope.Result.Workspaces {
+		workspaces = append(workspaces, backend.Workspace{
+			ID:    item.WorkspaceID,
+			Label: item.Label,
+			Root:  roots[item.WorkspaceID],
+		})
+	}
+	return workspaces, nil
 }
 
 func (c *Client) CreateWorkspace(name, root, projectID string) (string, error) {
@@ -121,17 +170,32 @@ func (c *Client) CreateWorkspace(name, root, projectID string) (string, error) {
 	return "", nil
 }
 
+func (c *Client) FocusWorkspace(workspace string) error {
+	if workspace == "" {
+		return errors.New("workspace id is required")
+	}
+	_, err := c.capture("workspace", "focus", workspace)
+	return err
+}
+
 func (c *Client) ProjectContext(workspace string) string {
 	return ""
 }
 
 func (c *Client) WorkspaceRoot(workspace string) string {
 	ctx := pluginContext()
-	if ctx.FocusedPaneCWD != "" {
+	if (workspace == "" || workspace == ctx.WorkspaceID) && ctx.FocusedPaneCWD != "" {
 		return ctx.FocusedPaneCWD
 	}
-	if ctx.WorkspaceCWD != "" {
+	if (workspace == "" || workspace == ctx.WorkspaceID) && ctx.WorkspaceCWD != "" {
 		return ctx.WorkspaceCWD
+	}
+	if workspaces, err := c.WorkspaceList(); err == nil {
+		for _, item := range workspaces {
+			if item.ID == workspace && item.Root != "" {
+				return item.Root
+			}
+		}
 	}
 	panes, err := c.Panes(workspace)
 	if err == nil {
@@ -159,6 +223,28 @@ func (c *Client) Panes(workspace string) ([]backend.Pane, error) {
 		return nil, err
 	}
 	return c.backendPanes(workspace, envelope.Result.Panes)
+}
+
+func (c *Client) workspaceRoots() (map[string]string, error) {
+	out, err := c.capture("pane", "list")
+	if err != nil {
+		return nil, err
+	}
+	var envelope responseEnvelope
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		return nil, err
+	}
+	roots := map[string]string{}
+	for _, pane := range envelope.Result.Panes {
+		if pane.WorkspaceID == "" || pane.CWD == "" {
+			continue
+		}
+		current, ok := roots[pane.WorkspaceID]
+		if !ok || len(pane.CWD) < len(current) {
+			roots[pane.WorkspaceID] = pane.CWD
+		}
+	}
+	return roots, nil
 }
 
 func (c *Client) Launch(spec backend.LaunchSpec) (string, error) {
@@ -212,11 +298,7 @@ func (c *Client) Attach(workspace string) error {
 }
 
 func (c *Client) Switch(workspace string) error {
-	if workspace == "" {
-		return errors.New("workspace id is required")
-	}
-	_, err := c.capture("workspace", "focus", workspace)
-	return err
+	return c.FocusWorkspace(workspace)
 }
 
 func (c *Client) PopupMenu(program string) error {
@@ -232,7 +314,15 @@ func (c *Client) KillWorkspace(workspace string) error {
 }
 
 func (c *Client) OpenPalette() error {
-	args := []string{"plugin", "pane", "open", "--plugin", "muxpad", "--entrypoint", "palette", "--placement", "overlay", "--focus"}
+	return c.openPane("palette")
+}
+
+func (c *Client) OpenProjectPalette() error {
+	return c.openPane("project-palette")
+}
+
+func (c *Client) openPane(entrypoint string) error {
+	args := []string{"plugin", "pane", "open", "--plugin", "muxpad", "--entrypoint", entrypoint, "--placement", "overlay", "--focus"}
 	if ctx := os.Getenv("HERDR_PLUGIN_CONTEXT_JSON"); ctx != "" {
 		args = append(args, "--env", "MUXPAD_HERDR_CONTEXT_JSON="+ctx)
 	}
