@@ -24,5 +24,7 @@ id = "launch-hardcoded"
 title = "Muxpad: Launch hardcoded task"
 description = "Create a Herdr tab and run the walking-skeleton command in its real shell."
 contexts = ["global", "workspace", "tab", "pane"]
-# Repo-relative path: Herdr runs action commands with the plugin root as cwd.
-command = ["./dist/muxpad-herdr", "launch-hardcoded"]
+# Resolve the built binary via the absolute HERDR_PLUGIN_ROOT that Herdr injects.
+# A bare name would need it on PATH; a relative program path is ambiguous once
+# Herdr sets the child's working directory (Rust flags this as platform-specific).
+command = ["sh", "-c", 'exec "$HERDR_PLUGIN_ROOT/dist/muxpad-herdr" launch-hardcoded']
