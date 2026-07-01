@@ -253,14 +253,32 @@ func (c *Client) Launch(spec backend.LaunchSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	command := "exec " + backend.WrappedCommand(spec.Definition.Command, spec.Definition.ExitMode, backend.CommandWrapOptions{})
-	if err := c.RunInPane(pane, command); err != nil {
+	if err := c.RunInPane(pane, paneCommand(spec.Definition)); err != nil {
 		return "", err
 	}
 	if err := c.recordLaunch(spec, pane.ID, directory); err != nil {
 		return "", err
 	}
 	return pane.ID, nil
+}
+
+// paneCommand is the shell input sent to a herdr pane's interactive shell.
+// Herdr panes are already interactive shells, so we send the task command
+// verbatim: it echoes as a single clean line and lands in shell history, so the
+// pane can be re-run with the up arrow. This deliberately skips the sh wrapper
+// the tmux backend needs (which, typed into an interactive shell, produced a
+// wall of `quote>` noise). "keep" and "keep-on-error" both simply return to the
+// prompt when the command exits; "close" execs the command so the pane exits
+// with it.
+func paneCommand(def config.Definition) string {
+	command := strings.TrimSpace(def.Command)
+	if command == "" {
+		return command
+	}
+	if def.ExitMode == config.ExitClose {
+		return "exec " + command
+	}
+	return command
 }
 
 func (c *Client) createPlacedPane(spec backend.LaunchSpec, directory string) (backend.Pane, error) {

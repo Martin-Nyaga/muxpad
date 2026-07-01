@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/Martin-Nyaga/muxpad/internal/backend"
@@ -209,7 +208,7 @@ func TestLaunchCreatesWorkspaceTabAndRunsDeclaredCommand(t *testing.T) {
 	if got, want := calls[0], []string{"herdr-test", "tab", "create", "--workspace", "w1", "--cwd", "/repo/services/api", "--label", "API", "--focus"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("tab call = %#v, want %#v", got, want)
 	}
-	if got := calls[1]; got[0] != "herdr-test" || got[1] != "pane" || got[2] != "run" || got[3] != "w1:p2" || !strings.HasPrefix(got[4], "exec sh -c ") || !strings.Contains(got[4], "pnpm dev:api") || !strings.Contains(got[4], "[ $status -eq 0 ]") {
+	if got := calls[1]; got[0] != "herdr-test" || got[1] != "pane" || got[2] != "run" || got[3] != "w1:p2" || got[4] != "pnpm dev:api" {
 		t.Fatalf("run call = %#v", got)
 	}
 }
@@ -347,7 +346,7 @@ func TestLaunchHonorsVerticalSplitPlacement(t *testing.T) {
 	if got, want := calls[0], []string{"herdr-test", "pane", "split", "--pane", "w1:p1", "--direction", "down", "--cwd", "/repo", "--focus"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("split call = %#v, want %#v", got, want)
 	}
-	if got := calls[1]; got[0] != "herdr-test" || got[1] != "pane" || got[2] != "run" || got[3] != "w1:p3" || !strings.HasPrefix(got[4], "exec sh -c ") || !strings.Contains(got[4], "muxpad_seed_history") || strings.Contains(got[4], "[ $status -eq 0 ]") {
+	if got := calls[1]; got[0] != "herdr-test" || got[1] != "pane" || got[2] != "run" || got[3] != "w1:p3" || got[4] != "pnpm dev:api" {
 		t.Fatalf("run call = %#v", got)
 	}
 }
@@ -388,8 +387,8 @@ func TestLaunchHonorsHorizontalSplitPlacementAndCloseExitMode(t *testing.T) {
 	if got, want := calls[0], []string{"herdr-test", "pane", "split", "--pane", "w1:p1", "--direction", "right", "--cwd", "/repo", "--focus"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("split call = %#v, want %#v", got, want)
 	}
-	if got := calls[1][4]; !strings.HasPrefix(got, "exec sh -c ") || !strings.Contains(got, "go test ./...") || !strings.Contains(got, `exit "$status"`) || strings.Contains(got, "muxpad_seed_history") {
-		t.Fatalf("close wrapper = %q", got)
+	if got := calls[1][4]; got != "exec go test ./..." {
+		t.Fatalf("close command = %q", got)
 	}
 }
 
