@@ -64,7 +64,7 @@ type workspaceInfo struct {
 }
 
 func New() *Client {
-	return &Client{Bin: envDefault("HERDR_BIN_PATH", "herdr")}
+	return &Client{Bin: resolveBin()}
 }
 
 func (c *Client) Inside() bool {
@@ -461,6 +461,11 @@ func (c *Client) run(args ...string) Result {
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		stderr = string(exitErr.Stderr)
 	}
+	// A command that never started (missing or unexecutable binary) reports no
+	// stderr at all, which used to surface as a bare "herdr ... failed:".
+	if strings.TrimSpace(stderr) == "" {
+		stderr = err.Error()
+	}
 	return Result{Stdout: string(out), Stderr: stderr, OK: false}
 }
 
@@ -468,7 +473,36 @@ func (c *Client) bin() string {
 	if c.Bin != "" {
 		return c.Bin
 	}
-	return envDefault("HERDR_BIN_PATH", "herdr")
+	return resolveBin()
+}
+
+// resolveBin picks the herdr CLI to shell out to. Herdr injects HERDR_BIN_PATH
+// into plugin processes from the running server's own executable, which on
+// Linux is read through /proc/self/exe. Once `herdr update` replaces the binary
+// under a live server, that link reads as "<path> (deleted)" and the variable
+// arrives holding a path that cannot be executed, so every herdr call from the
+// plugin fails until the server is restarted. Prefer the real file behind such
+// a path, then fall back to a PATH lookup rather than trusting it blindly.
+func resolveBin() string {
+	value := os.Getenv("HERDR_BIN_PATH")
+	if value == "" {
+		return "herdr"
+	}
+	if isExecutableFile(value) {
+		return value
+	}
+	if trimmed := strings.TrimSuffix(value, " (deleted)"); trimmed != value && isExecutableFile(trimmed) {
+		return trimmed
+	}
+	return "herdr"
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode().Perm()&0o111 != 0
 }
 
 func paneID(output string) string {
@@ -562,13 +596,6 @@ func splitDirection(placement config.Placement) string {
 		return "right"
 	}
 	return "down"
-}
-
-func envDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
 }
 
 func first(values []string) string {

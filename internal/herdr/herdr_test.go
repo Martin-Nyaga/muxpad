@@ -422,3 +422,37 @@ func writeState(t *testing.T, dir string, state pluginState) {
 		t.Fatal(err)
 	}
 }
+
+func TestResolveBinIgnoresUnexecutableHerdrBinPath(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "herdr")
+	if err := os.WriteFile(real, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "absent")
+	if err := os.WriteFile(filepath.Join(dir, "herdr.txt"), []byte("not a program"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"unset falls back to PATH", "", "herdr"},
+		{"executable is used as given", real, real},
+		// Herdr reads its own /proc/self/exe to fill HERDR_BIN_PATH, so a binary
+		// replaced under a running server arrives with a " (deleted)" suffix.
+		{"deleted suffix is trimmed", real + " (deleted)", real},
+		{"missing path falls back to PATH", missing, "herdr"},
+		{"non-executable file falls back to PATH", filepath.Join(dir, "herdr.txt"), "herdr"},
+		{"directory falls back to PATH", dir, "herdr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HERDR_BIN_PATH", tc.value)
+			if got := resolveBin(); got != tc.want {
+				t.Fatalf("resolveBin() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
