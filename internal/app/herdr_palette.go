@@ -18,15 +18,8 @@ func (a *Application) DeclaredTaskMenu() error {
 	if err != nil {
 		return err
 	}
-	project, ok := a.projectForSession(workspace)
-	if !ok {
-		root := a.Backend.WorkspaceRoot(workspace)
-		if root == "" {
-			root = workspace
-		}
-		return fmt.Errorf("no muxpad project configured for current herdr workspace (%s)", root)
-	}
-	items, err := a.herdrTaskItems(workspace, project)
+	project, hasProject := a.projectForSession(workspace)
+	items, err := a.herdrTaskItems(workspace, project, hasProject)
 	if err != nil {
 		return err
 	}
@@ -37,23 +30,27 @@ func (a *Application) DeclaredTaskMenu() error {
 	return a.HandleSelection(workspace, selection)
 }
 
-func (a *Application) herdrTaskItems(workspace string, project config.Project) ([]palette.Item, error) {
+func (a *Application) herdrTaskItems(workspace string, project config.Project, hasProject bool) ([]palette.Item, error) {
 	panes, err := a.Backend.Panes(workspace)
 	if err != nil {
 		return nil, err
 	}
-	scripts := a.discoveredScripts(workspace, project, true)
+	root := project.Root
+	if !hasProject {
+		root = a.Backend.WorkspaceRoot(workspace)
+	}
+	scripts := a.discoveredScripts(workspace, project, hasProject)
 	items := make([]palette.Item, 0, len(project.Tasks)+len(scripts))
 	for _, task := range project.Tasks {
 		pane, ok := findManaged(panes, "task", task.ID)
-		items = append(items, launchableItem("task:"+task.ID, "Tasks", task, pane, ok, project.Root))
+		items = append(items, launchableItem("task:"+task.ID, "Tasks", task, pane, ok, root))
 		if ok {
 			items = append(items, a.instanceItem("task:"+task.ID, task, pane))
 		}
 	}
 	for _, script := range scripts {
 		pane, ok := findManaged(panes, "script", script.ID)
-		items = append(items, launchableItem("script:"+script.ID, "Discovered scripts", script, pane, ok, project.Root))
+		items = append(items, launchableItem("script:"+script.ID, "Discovered scripts", script, pane, ok, root))
 		if ok {
 			items = append(items, a.instanceItem("script:"+script.ID, script, pane))
 		}

@@ -97,10 +97,15 @@ output.
 
 ### Package-script autodiscovery
 
-For any project, Muxpad scans the root `package.json` and every workspace
-package, detects the package manager, and offers useful scripts automatically.
+For a registered project, Muxpad scans its root `package.json` and every
+workspace package. Without a matching project or config file, it scans the
+directory of the pane that opened the palette instead. It detects the package
+manager and offers useful scripts automatically.
 Discovered scripts appear labelled `SCRIPT`, separately from your configured
 `TASK` entries, and will **never launch automatically**.
+
+The task palette still opens when no scripts are found; registering a project
+is only necessary for custom tasks and entries in the project launcher.
 
 ## Palette actions
 
